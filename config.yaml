@@ -1,0 +1,113 @@
+# Hello Farmer Central Configuration
+
+app:
+  name: "Hello Farmer"
+  version: "0.1.0"
+  environment: "development"
+  debug: true
+
+telephony:
+  audiosocket:
+    host: "0.0.0.0"
+    port: 9092
+  vad:
+    provider: "silero"
+    threshold: 0.5
+    min_speech_ms: 250
+    min_silence_duration_ms: 1000
+    speech_pad_ms: 30
+  timeouts:
+    max_call_seconds: 600
+    initial_silence_seconds: 10
+    inter_utterance_silence_seconds: 5
+    max_silence_turns_before_hangup: 2
+  barge_in:
+    enabled: false # Must remain false by default per Section 2 override
+  rates:
+    concurrency_limit: 2
+    per_caller_daily_limit: 10
+
+audio:
+  telephony_sample_rate: 8000
+  stt_sample_rate: 16000
+  channels: 1
+  sample_width_bytes: 2 # 16-bit signed linear
+
+languages:
+  supported:
+    - code: "am"
+      name: "Amharic"
+      script: "Ge'ez"
+      default_voice: "am-ET-AmehaNeural"
+    - code: "om"
+      name: "Afaan Oromo"
+      script: "Latin"
+      default_voice: "facebook/mms-tts-gaz"
+  primary: "am"
+
+stt:
+  default_provider: "gemini"
+  providers:
+    gemini:
+      model_name: "gemini-2.5-flash"
+    whisper:
+      model_name: "Systran/faster-whisper-small"
+      device: "auto"
+    mms:
+      model_name: "facebook/mms-1b-all"
+      device: "auto"
+      license_warning: "Meta CC-BY-NC: Non-commercial evaluation only"
+
+tts:
+  default_provider: "edge_tts"
+  cache_dir: "backend/cache/tts"
+  providers:
+    edge_tts:
+      amharic_voice: "am-ET-AmehaNeural"
+    mms_tts:
+      amharic_model: "facebook/mms-tts-amh"
+      oromo_model: "facebook/mms-tts-gaz"
+
+llm:
+  default_provider: "gemini"
+  timeout_seconds: 8.0
+  max_retries: 1
+  providers:
+    gemini:
+      model: "gemini-2.5-flash"
+    groq:
+      model: "llama-3.3-70b-versatile"
+    openrouter:
+      model: "meta-llama/llama-3.2-3b-instruct:free"
+    ollama:
+      base_url: "http://localhost:11434"
+      model: "qwen2.5:7b"
+
+rag:
+  embedding_provider: "bge_m3"
+  embedding_model: "BAAI/bge-m3"
+  chunk_size_tokens: 400
+  chunk_overlap_tokens: 50
+  similarity_threshold: 0.65
+  top_k: 4
+
+weather:
+  default_provider: "open_meteo"
+  cache_ttl_minutes: 60
+  heavy_rain_threshold_mm: 20.0
+
+sms:
+  provider: "mock"
+  max_segments: 3
+
+fallback_messages:
+  am:
+    safe_fallback: "ይቅርታ፣ ለዚህ ጥያቄ በቂ የተረጋገጠ መረጃ አላገኘሁም። እባክዎ የአካባቢዎን የግብርና ልማት ጣቢያ ባለሙያ ያማክሩ ወይም በስምንት ዜሮ ሁለት ስምንት ይደውሉ።"
+    greeting: "እንኳን ወደ ሄሎ ፋርመር የሙከራ የግብርና ረዳት በደህና መጡ። ጥያቄዎን በቀጥታ መናገር ይችላሉ።"
+    one_moment: "እባክዎ ትንሽ ይጠብቁ..."
+    goodbye: "ስለደወሉ እናመሰግናለን። ደህና ይሁኑ።"
+  om:
+    safe_fallback: "Dhiifama, gaaffii kanaaf ragaan amansiisaan gahaan hin jiru. Maaloo ogeessa misooma qonnaa naannoo keessanii gaafadhaa yookiin bilbila saddeet-duwwaa-lama-saddeet irratti bilbilaa."
+    greeting: "Baga gara gargaaraa qonnaa Heelo Faarmar nagaan dhuftan. Gaaffii keessan kallattiin dubbachuu dandeessu."
+    one_moment: "Mee xiqqoo eegaa..."
+    goodbye: "Waan bilbiltaniif galatoomaa. Nagaatti."

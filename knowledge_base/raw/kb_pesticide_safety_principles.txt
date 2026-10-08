@@ -1,0 +1,15 @@
+# PLACEHOLDER DOCUMENT: NOT REAL AGRONOMIC GUIDANCE
+# Document ID: DOC-005
+# Title: Agrochemical Handling Safety Principles
+# Tier: placeholder
+# Language: am / om / en
+
+[PLACEHOLDER NOTICE: This document contains only general safety principles. It contains no numbers, no dosage rates, no chemical names, and no schedule figures.]
+
+All crop protection chemicals must be handled with extreme care. Never spray against the wind direction. Keep chemicals away from drinking water sources, livestock, and children. In the event of chemical contamination or suspected poisoning, seek immediate medical assistance at the nearest health center. Always consult the local agricultural development agent before purchasing or applying any pesticide product.
+
+የግብርና ኬሚካሎች አጠቃቀም ጥንቃቄዎች:
+ማንኛውንም የፀረ-ተባይ ኬሚካል ሲጠቀሙ ከፍተኛ ጥንቃቄ ማድረግ ያስፈልጋል። ከነፋስ አቅጣጫ በተቃራኒ ፈጽሞ አይርጩ። ኬሚካሎችን ከመጠጥ ውሃ፣ ከከብቶች እና ከህፃናት ያርቁ። የመመረዝ ምልክት ካለ ወዲያውኑ ወደ ጤና ጣቢያ ይሂዱ። ማንኛውንም ኬሚካል ከመግዛት ወይም ከመጠቀምዎ በፊት ሁልጊዜ የአካባቢዎን የግብርና ባለሙያ ያማክሩ።
+
+Eegumsa Qoricha Qonnaa:
+Qorichoota qonnaa yeroo fayyadaman of eeggannoo guddaa gochuun barbaachisaadha. Kallattii qilleensaa duraan hin fufinaa. Madda bishaanii fi daa'imman irraa fageessaa. Yoo summiin nama tuqe hatattamaan gara buufata fayyaa deemaa.

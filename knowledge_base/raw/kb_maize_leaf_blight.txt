@@ -1,0 +1,11 @@
+# PLACEHOLDER DOCUMENT: NOT REAL AGRONOMIC GUIDANCE
+# Document ID: DOC-002
+# Title: Maize Leaf Blight and Rust Symptoms
+# Tier: placeholder
+# Language: om / en
+
+[PLACEHOLDER NOTICE: This document contains only general symptom descriptions. It contains no numbers, no dosage rates, no chemical names, and no schedule figures.]
+
+Maize foliage can be affected by fungal foliar diseases during wet and humid periods. Symptoms often start on lower leaves as elongated grayish or brownish spots, which may expand along the leaf veins. Early recognition allows farmers to avoid working in fields when leaves are wet to limit spore spread.
+
+Boqqoolloo irratti dhibeen baalaa yeroo bokkaa fi jiidhina ol'aanaa qabu mul'achuu danda'a. Mallattoon jalqabaa baala jalaarraa kan eegalu yoo tahu, mallattoolee boora ykn daalacha dheeratan mul'isuu danda'a. Qotee bultoonni yeroo baalli jiidhaa ta'u keessa deemuurraa of qusachuu qabu. Qoricha ykn furmaata dabalataaf ogeessa qonnaa mariisisaa.

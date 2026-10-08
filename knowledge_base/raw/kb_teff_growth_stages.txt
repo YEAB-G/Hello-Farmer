@@ -1,0 +1,14 @@
+# PLACEHOLDER DOCUMENT: NOT REAL AGRONOMIC GUIDANCE
+# Document ID: DOC-001
+# Title: Teff Growth Stages and Moisture Sensitivity Overview
+# Tier: placeholder
+# Language: am / en
+
+[PLACEHOLDER NOTICE: This document contains only general agronomic concepts. It contains no numbers, no dosage rates, no chemical names, and no schedule figures.]
+
+Teff (Eragrostis tef) is a cereal crop sensitive to water conditions during its early vegetative cycle. When excess standing water accumulates in the root zone, the plants may show yellowing leaves and reduced vigor due to low soil aeration. Yellowing can also be caused by poor soil nutrient availability in poorly drained soils. 
+
+Farmers observing yellow leaves should examine the field for signs of standing water. If water is pooling, creating surface drainage furrows can help remove excess surface water. For specific fertilizer amounts or treatment recommendations, consult the local development agent.
+
+የጤፍ ሰብል የእድገት ደረጃዎች እና የእርጥበት ሁኔታ (ማስታወሻ):
+ጤፍ በእድገት ወቅት ከመጠን ያለፈ የውሃ መተኛት ሲያጋጥመው የቅጠል ቢጫ መሆን ሊያሳይ ይችላል። በቂ የኦክስጅን ዝውውር በአፈር ውስጥ ባለመኖሩ ወይም የንጥረ ነገር እጥረት ምክንያት ሊከሰት ይችላል። ገበሬዎች የውሃ ማቆር መኖሩን ማረጋገጥ እና ውሃውን ማፍሰስ አለባቸው። ዝርዝር የኬሚካል ወይም የማዳበሪያ መጠን ለማወቅ የአካባቢውን የግብርና ልማት ጣቢያ ባለሙያ ይጠይቁ።

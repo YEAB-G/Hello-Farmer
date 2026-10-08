@@ -1,0 +1,14 @@
+# PLACEHOLDER DOCUMENT: NOT REAL AGRONOMIC GUIDANCE
+# Document ID: DOC-004
+# Title: Vertisol Soil Drainage Concepts in Ethiopian Highlands
+# Tier: placeholder
+# Language: am / om / en
+
+[PLACEHOLDER NOTICE: This document contains only general agronomic concepts. It contains no numbers, no dosage rates, no chemical names, and no schedule figures.]
+
+Vertisols (heavy black clay soils, walka / koticha) swell when wet and crack when dry. During heavy rains, water infiltration slows dramatically, causing waterlogging that can suffocate cereal seedlings. Broadbed and furrow techniques or traditional drainage furrows help channel excess water off the field without causing severe soil erosion.
+
+የጥቁር አፈር (ወልካ) የውሃ ማፋሰስ ዘዴዎች:
+የጥቁር አፈር እርጥበት ሲያገኝ የሚያብጥ እና ውሃን የማያሰርግ በመሆኑ ሰብሎችን በውሃ ሊያፍን ይችላል። የውሃ መውጫ ቦዮችን በማዘጋጀት ውሃውን ማስወገድ የሰብሉን እድገት ይረዳል።
+
+Biyyeen kotichaa yeroo bokkaan cimaan roobu bishaan of keessaa dhangalaasuu waan dadhabuuf, lolaan bahee akka sanyiin hin miidhamneef bo'oo lolaa baasuu barbaachisa.

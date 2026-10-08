@@ -1,0 +1,12 @@
+# PLACEHOLDER DOCUMENT: NOT REAL AGRONOMIC GUIDANCE
+# Document ID: DOC-003
+# Title: Wheat Yellow Rust General Identification
+# Tier: placeholder
+# Language: am / en
+
+[PLACEHOLDER NOTICE: This document contains only general symptom descriptions. It contains no numbers, no dosage rates, no chemical names, and no schedule figures.]
+
+Wheat yellow rust (stripe rust) appears as linear stripes of yellow to orange pustules on the upper surface of wheat leaves. The disease develops rapidly under cool, humid weather conditions in highland areas. Farmers should monitor fields regularly during tillering and heading stages. For chemical control decisions and fungicide selection, farmers must consult their local agricultural extension office or development agent immediately upon observation.
+
+የስንዴ ቢጫ ዋግ (ማስታወሻ):
+የስንዴ ቢጫ ዋግ በቅጠሉ የላይኛው ክፍል ላይ እንደ ቢጫ ወይም ብርቱካናማ ነጠብጣቦች በመስመር ተደርድረው ይታያሉ። ቀዝቃዛ እና እርጥበታማ የአየር ጠባይ ባለባቸው የደጋ አካባቢዎች በፍጥነት ይዛመታል። ገበሬዎች ማሳቸውን በየጊዜው መከታተል አለባቸው። ለኬሚካል ቁጥጥር እና ለመድሃኒት ምርጫ ወዲያውኑ የአካባቢውን የግብርና ልማት ጣቢያ ባለሙያ ማማከር ያስፈልጋል።
