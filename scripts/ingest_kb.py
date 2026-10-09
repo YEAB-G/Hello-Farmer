@@ -24,7 +24,7 @@ async def main():
         print(f"Directory {kb_dir} does not exist!")
         return
 
-    doc_files = [f for f in kb_dir.iterdir() if f.is_file() and f.suffix.lower() in (".txt", ".pdf", ".docx")]
+    doc_files = [f for f in kb_dir.iterdir() if f.is_file() and f.suffix.lower() in (".txt", ".pdf", ".docx", ".md")]
     print(f"Found {len(doc_files)} candidate documents in {kb_dir}")
 
     engine = create_async_engine(settings.DATABASE_URL, echo=False)
