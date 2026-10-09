@@ -19,7 +19,42 @@ The visual design is anchored in the official **Hello Farmer Emblem**:
 
 ---
 
-## 2. Key Web Application Modules
+## 2. End-to-End System Architecture
+
+```mermaid
+flowchart TD
+    Caller[Farmer Telephone / MicroSIP 1001] -->|SIP G.711 / UDP 5060| Asterisk[Asterisk 20 LTS Telephony]
+    Asterisk -->|AudioSocket 8kHz Linear PCM / TCP 9092| Bridge[Python AudioSocket TCP Server]
+
+    subgraph Core Pipeline [Conversational Agricultural Pipeline]
+        Bridge --> VAD[Energy VAD / Speech Endpointing]
+        VAD --> Resample[Audio Resampling 8kHz to 16kHz]
+        Resample --> STT[STT: Groq Whisper-Large-V3 / Gemini]
+        STT --> LangDet[Language & Dialect Identification]
+        LangDet --> Retrieval[pgvector Agricultural Knowledge Base]
+        LangDet --> Weather[Open-Meteo Agro-Weather API]
+        Retrieval --> LLM[LLM Reasoning: Groq Qwen / Gemini 2.5]
+        Weather --> LLM
+        LLM --> Guardrails[Safety & Dosage Guardrails]
+        Guardrails --> TTS[TTS: Edge-TTS MekdesNeural / AmehaNeural]
+        TTS --> Downsample[Downsample 16kHz to 8kHz Linear PCM]
+    end
+
+    Downsample --> Bridge
+    Bridge --> Asterisk
+    Asterisk --> Caller
+
+    subgraph Web & Background Services
+        Guardrails --> DB[(PostgreSQL + pgvector)]
+        Guardrails --> Worker[arq Redis Background Worker]
+        Worker --> SMS[Farmer SMS Dispatcher]
+        Web[Next.js 14 Web Portal] -->|FastAPI REST| DB
+    end
+```
+
+---
+
+## 3. Key Web Application Modules
 
 * **Home Dashboard**: Welcoming seasonal greeting, instant "Ask Hello Farmer" query bar, 8028 telephone hotline status, and quick advisory pills.
 * **AI Agricultural Advisor**: Grounded conversational chat with Amharic/Afaan Oromo Unicode font support, suggested farming questions, Knowledge Base verification tags, and source citations.
@@ -31,7 +66,7 @@ The visual design is anchored in the official **Hello Farmer Emblem**:
 
 ---
 
-## 3. Quickstart: Running the Application
+## 4. Quickstart: Running the Application
 
 ### Option A: With Docker Compose (Recommended)
 
@@ -68,7 +103,7 @@ The frontend will be live on `http://localhost:3000` with hot-reloading.
 
 ---
 
-## 4. Environment Variables (`.env`)
+## 5. Environment Variables (`.env`)
 
 | Variable | Description | Default / Example |
 | :--- | :--- | :--- |
@@ -83,7 +118,7 @@ The frontend will be live on `http://localhost:3000` with hot-reloading.
 
 ---
 
-## 5. Testing MicroSIP Softphone (Call 8028)
+## 6. Testing MicroSIP Softphone (Call 8028)
 
 1. Download and open **MicroSIP** (or Linphone / Zoiper).
 2. Configure account settings:
