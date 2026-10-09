@@ -153,3 +153,13 @@ python scripts/test_pipeline.py
 # 6. Simulate synthetic telephone call over AudioSocket
 python scripts/simulate_call.py
 ```
+
+---
+
+## 8. Agricultural Safety Guardrails & Dosage Policy
+
+Hello Farmer adheres to a strict agronomic safety policy to protect Ethiopian smallholder farmers:
+
+* **Zero-Hallucination Chemical Doses**: Pesticide, herbicide, and chemical dosage figures are only provided if retrieved verbatim from verified **Tier 1 (MoA / EIAR)** publications.
+* **Mandatory Development Agent Referral**: Whenever certainty or source grounding falls below threshold, the agent immediately defaults to the verified safe fallback prompt advising the farmer to consult their local Kebele Development Agent (DA).
+* **Bilingual Telephony Fail-safes**: Both Amharic and Afaan Oromo prompt sets include pre-rendered studio fallbacks for low confidence, network interruptions, and system errors.
