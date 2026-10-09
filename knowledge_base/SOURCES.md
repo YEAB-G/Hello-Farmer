@@ -61,4 +61,27 @@ This document tracks all agricultural reference materials ingested into Hello Fa
 
 ## 2. Ingested Official Documents (Tier 1 & 2)
 
-*(Will be populated during Phase 3 with verified open-access extension manuals from the Ethiopian Ministry of Agriculture and EIAR)*
+1. **DOC-MOA-001: Technical Manual for Integrated Soil Fertility Management (ISFM)**
+   - **Publisher**: Ministry of Agriculture (MoA), Federal Democratic Republic of Ethiopia
+   - **Tier**: `Tier 1` (National Extension Guideline)
+   - **Topics**: Soil fertility replenishment, composting, biochar, mineral fertilizer combinations, crop rotation, soil acidity and liming.
+   - **File**: `knowledge_base/raw/moa_isfm_technical_manual.md`
+
+2. **DOC-MOA-002: Field Guide for Extension Agents on Integrated Soil Fertility Management**
+   - **Publisher**: Ministry of Agriculture (MoA), Federal Democratic Republic of Ethiopia
+   - **Tier**: `Tier 1` (Extension Field Guide)
+   - **Topics**: Practical agronomic practices for smallholders, soil testing, vermicomposting, balanced nutrient application.
+   - **File**: `knowledge_base/raw/moa_isfm_field_guide.md`
+
+3. **DOC-MOA-003: National Fertilizer Blending and NP Strategy Manual**
+   - **Publisher**: Ministry of Agriculture (MoA), Federal Democratic Republic of Ethiopia
+   - **Tier**: `Tier 1` (Strategy & Policy Guideline)
+   - **Topics**: NPS and urea fertilization ratios, targeted micro-nutrients (Zn, B), balanced fertilization for teff, wheat, and maize.
+   - **File**: `knowledge_base/raw/moa_np_fertilizer_strategy.md`
+
+4. **DOC-MOA-004: Cattle Urine Collection, Storage, and Agronomic Use Manual**
+   - **Publisher**: Ministry of Agriculture (MoA), Federal Democratic Republic of Ethiopia
+   - **Tier**: `Tier 1` (Practical Organic Agriculture Guide)
+   - **Topics**: Liquid organic bio-fertilizer, cattle shed floor preparation, storage safety, dilution ratios, and foliar spray application.
+   - **File**: `knowledge_base/raw/moa_cattle_urine_manual.md`
+
