@@ -127,3 +127,29 @@ The frontend will be live on `http://localhost:3000` with hot-reloading.
    * **Domain**: `127.0.0.1`
    * **Password**: `FarmerPass1001!`
 3. Dial **8028** and speak into your microphone in Amharic or Afaan Oromo.
+
+---
+
+## 7. Knowledge Base & Pipeline Evaluation CLI
+
+The repository includes dedicated CLI utilities for ingestion, benchmarking, and telephony verification:
+
+```bash
+# 1. Ingest official agronomic manuals into pgvector database
+python scripts/ingest_kb.py
+
+# 2. Pre-render fixed Amharic & Afaan Oromo prompt WAV files
+python scripts/render_prompts.py --lang all
+
+# 3. Test speech-to-text recognition accuracy with Groq Whisper
+python scripts/test_stt.py
+
+# 4. Test LLM latency and structured JSON output
+python scripts/test_groq_llm.py
+
+# 5. Run end-to-end conversational audio pipeline
+python scripts/test_pipeline.py
+
+# 6. Simulate synthetic telephone call over AudioSocket
+python scripts/simulate_call.py
+```
