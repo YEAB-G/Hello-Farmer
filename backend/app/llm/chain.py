@@ -40,9 +40,9 @@ class LLMFallbackChain(BaseLLMProvider):
         language: str = "am"
     ) -> LLMAnswer:
         providers = [
-            ("gemini", self.gemini),
             ("groq", self.groq),
             ("openrouter", self.openrouter),
+            ("gemini", self.gemini),
             ("ollama", self.ollama),
         ]
 
@@ -81,3 +81,6 @@ class LLMFallbackChain(BaseLLMProvider):
             topic="general",
             confidence=0.0
         )
+
+    generate = generate_response
+

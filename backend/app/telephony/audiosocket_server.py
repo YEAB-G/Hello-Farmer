@@ -16,12 +16,19 @@ import uuid
 logger = logging.getLogger("hello_farmer.audiosocket")
 
 # Asterisk res_audiosocket.c protocol constants:
-# 0x10 = 16-bit 8kHz signed linear mono audio
 # 0x00 = Hangup / connection termination
-# 0x01 = Error / alternate hangup
+# 0x01 = Call UUID (16 bytes payload)
+# 0x02 = Silence
+# 0x03 = DTMF digit
+# 0x10 = 16-bit 8kHz signed linear mono PCM audio
+# 0x11 - 0x18 = Higher sample rate SLIN audio
+# 0xFF = Error
 TYPE_HANGUP = 0x00
+TYPE_UUID = 0x01
+TYPE_SILENCE = 0x02
+TYPE_DTMF = 0x03
 TYPE_AUDIO = 0x10
-TYPE_ERROR = 0x01
+TYPE_ERROR = 0xFF
 
 
 class AudioSocketConnection:
@@ -32,14 +39,45 @@ class AudioSocketConnection:
         self.is_active = True
 
     async def initialize(self):
-        """Read initial 16-byte UUID handshake from Asterisk."""
+        """Read initial AudioSocket handshake from Asterisk (Type 0x01 + 16 bytes UUID)."""
         try:
-            uuid_bytes = await self.reader.readexactly(16)
-            self.call_uuid = str(uuid.UUID(bytes=uuid_bytes))
+            # AudioSocket message header is 3 bytes: 1 byte Type, 2 bytes Length (big endian)
+            header = await self.reader.readexactly(3)
+            msg_type, length = struct.unpack("!BH", header)
+            if msg_type == TYPE_UUID and length == 16:
+                uuid_bytes = await self.reader.readexactly(16)
+                self.call_uuid = str(uuid.UUID(bytes=uuid_bytes))
+            elif length == 16:
+                uuid_bytes = await self.reader.readexactly(16)
+                self.call_uuid = str(uuid.UUID(bytes=uuid_bytes))
+            else:
+                # Raw 16-byte fallback if no 3-byte header
+                rest = await self.reader.readexactly(13)
+                self.call_uuid = str(uuid.UUID(bytes=header + rest))
+
             logger.info(f"AudioSocket call initialized with UUID: {self.call_uuid}")
+            print(f"\n📞 [AUDIOSOCKET 🎧] Call connected! UUID: {self.call_uuid}", flush=True)
         except Exception as e:
             logger.error(f"Failed to read AudioSocket UUID handshake: {e}")
             self.is_active = False
+
+    def drain_audio_buffer(self):
+        """Drain buffered frames accumulated in TCP reader during outgoing playback."""
+        drained_count = 0
+        try:
+            while len(self.reader._buffer) >= 3:
+                header = self.reader._buffer[:3]
+                msg_type, length = struct.unpack("!BH", header)
+                frame_len = 3 + length
+                if len(self.reader._buffer) < frame_len:
+                    break
+                del self.reader._buffer[:frame_len]
+                drained_count += 1
+            if drained_count > 0:
+                print(f"🧹 [BUFFER DRAIN] Cleared {drained_count} buffered frames from playback. Listening to caller in real time!", flush=True)
+        except Exception as e:
+            logger.warning(f"Error draining audio buffer: {e}")
+
 
     async def read_frame(self) -> tuple[int, bytes] | None:
         """Read a single AudioSocket protocol frame."""

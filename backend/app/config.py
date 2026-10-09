@@ -8,11 +8,13 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class AppSettings(BaseSettings):
     # Provider keys & defaults
-    LLM_PROVIDER: str = "gemini"
-    LLM_MODEL: str = "gemini-2.5-flash"
+    LLM_PROVIDER: str = "groq"
+    LLM_MODEL: str = "qwen/qwen3.8-27b"
     GEMINI_API_KEY: str | None = None
     GROQ_API_KEY: str | None = None
+    GROQ_MODEL: str = "qwen/qwen3.8-27b"
     OPENROUTER_API_KEY: str | None = None
+    OPENROUTER_MODEL: str = "nvidia/nemotron-3.5-lightning:free"
     OLLAMA_BASE_URL: str = "http://localhost:11434"
 
     STT_PROVIDER: str = "mms"
@@ -28,7 +30,8 @@ class AppSettings(BaseSettings):
     BARGE_IN_ENABLED: bool = False
     MAX_CALL_DURATION_SECONDS: int = 600
     INITIAL_SILENCE_TIMEOUT_SECONDS: int = 10
-    SPEECH_SILENCE_TIMEOUT_MS: int = 1000
+    SPEECH_SILENCE_TIMEOUT_MS: int = 800
+    VAD_ENERGY_THRESHOLD: int = 700
 
     # DB & Redis
     DATABASE_URL: str = "postgresql+asyncpg://farmer:farmerpass@postgres:5432/hello_farmer"

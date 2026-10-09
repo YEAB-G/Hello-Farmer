@@ -67,11 +67,11 @@ class CallStateMachine:
         )
 
         self.endpointer = VADEndpointer(
-            energy_threshold=200,
+            energy_threshold=settings.VAD_ENERGY_THRESHOLD,
             min_speech_ms=250,
             silence_timeout_ms=settings.SPEECH_SILENCE_TIMEOUT_MS,
             initial_silence_timeout_sec=settings.INITIAL_SILENCE_TIMEOUT_SECONDS,
-            max_utterance_sec=30.0,
+            max_utterance_sec=15.0,
         )
 
         self.start_time = time.monotonic()
@@ -94,44 +94,43 @@ class CallStateMachine:
             ACTIVE_CALL_COUNT += 1
 
         try:
-            logger.info(f"Starting call state machine for UUID: {self.call_uuid}")
+            print(f"\n=======================================================", flush=True)
+            print(f"📞 [CALL STARTED] New Call connected | UUID: {self.call_uuid[:8]}...", flush=True)
+            print(f"=======================================================", flush=True)
 
-            # State 1: ANSWER (Play bilingual greeting)
+            # State 1: ANSWER (Play greeting)
             await self._state_answer()
 
-            # State 2: CONSENT (If first-time caller)
-            if self.session_state.is_first_time:
-                await self._state_consent()
+            # Automatically grant consent for smooth seamless demo interaction
+            self.session_state.has_consented = True
 
             # Conversation Turn Loop: LISTEN -> THINK -> SPEAK
             while self.conn.is_active:
-                # Check maximum call duration cap (10 minutes)
                 if time.monotonic() - self.start_time >= settings.MAX_CALL_DURATION_SECONDS:
-                    logger.info(f"Max call duration reached ({settings.MAX_CALL_DURATION_SECONDS}s). Terminating.")
+                    print(f"⏱️ [CALL TIMEOUT] Max call duration reached. Terminating.", flush=True)
                     await self._play_prompt("goodbye", self.session_state.language)
                     break
 
                 # State 3: LISTEN with VAD
                 audio_pcm = await self._state_listen()
                 if audio_pcm is None:
-                    # Silence timeout or caller disconnect handled inside
                     if self.session_state.consecutive_silence_count >= 2:
-                        logger.info("Caller silent for 2 consecutive turns. Ending call.")
+                        print("📴 [CALL END] Caller silent for 2 consecutive turns. Ending call.", flush=True)
                         await self._play_prompt("goodbye", self.session_state.language)
                         break
                     continue
 
-                # Reset silence counter on speech detected
                 self.session_state.consecutive_silence_count = 0
                 self.session_state.turn_count += 1
 
-                # State 4: THINK (Immediate "one moment" cue)
+                # State 4: THINK
                 await self._state_think()
 
                 # State 5: Core Processing & SPEAK
                 await self._state_speak(audio_pcm)
 
         except Exception as e:
+            print(f"❌ [CALL ERROR] Unhandled exception: {e}", flush=True)
             logger.error(f"Unhandled error in call state machine {self.call_uuid}: {e}")
             await self._play_prompt("error", self.session_state.language)
         finally:
@@ -139,157 +138,137 @@ class CallStateMachine:
             await self.db_engine.dispose()
             async with CALL_LOCK:
                 ACTIVE_CALL_COUNT = max(0, ACTIVE_CALL_COUNT - 1)
-            logger.info(f"Call session ended for UUID: {self.call_uuid}. Active calls remaining: {ACTIVE_CALL_COUNT}")
+            print(f"📴 [CALL DISCONNECTED] UUID: {self.call_uuid[:8]}... Active calls: {ACTIVE_CALL_COUNT}\n", flush=True)
 
     async def _play_prompt(self, prompt_name: str, lang: str):
         """Play a pre-rendered 8 kHz PCM prompt audio to Asterisk."""
+        print(f"🔊 [AUDIO OUT] Playing prompt '{prompt_name}' ({lang})...", flush=True)
         pcm_bytes = get_prompt_pcm(prompt_name, lang)
         if pcm_bytes:
             await self.conn.send_audio(pcm_bytes)
 
     async def _state_answer(self):
         """State 1: Play disclaimer and greeting."""
-        logger.info(f"[{self.call_uuid}] State: ANSWER")
-        # Play bilingual greeting
+        print("▶️ [STATE: ANSWER] Playing bilingual greeting...", flush=True)
         await self._play_prompt("greeting", "am")
-        await self.conn.drain_input()
-        await asyncio.sleep(0.05)
+        await asyncio.sleep(0.1)
+        self.conn.drain_audio_buffer()
 
     async def _state_consent(self):
         """State 2: Voice consent question for first-time callers."""
-        logger.info(f"[{self.call_uuid}] State: CONSENT")
-        await self._play_prompt("consent", self.session_state.language)
-        await self.conn.drain_input()
-
-        # Listen for short voice confirmation (max 5s)
-        self.endpointer.reset()
-        self.endpointer.initial_silence_timeout_sec = 5.0
-        pcm_data = await self._collect_speech_frames()
-
-        if pcm_data and len(pcm_data) > 1600:  # > 100ms of audio
-            # Process short answer
-            resp = await process_utterance(
-                audio_bytes=pcm_data,
-                session=self.session_state,
-                text_override=None
-            )
-            ans_text = resp.text.lower()
-            self.session_state.has_consented = True
-            if any(k in ans_text for k in ["አዎ", "እሺ", "eyyee", "eeyyee", "yes", "okay", "ok"]):
-                logger.info(f"[{self.call_uuid}] Caller granted voice consent.")
-            else:
-                # Farmer asked an actual agricultural question immediately
-                logger.info(f"[{self.call_uuid}] Caller asked question during consent turn: '{ans_text[:40]}'. Answering now.")
-                if resp.audio and len(resp.audio) > 0:
-                    await self.conn.send_audio(resp.audio)
-                else:
-                    await self._play_prompt("safe_fallback", self.session_state.language)
-                await self.conn.drain_input()
-        else:
-            self.session_state.has_consented = True
-            logger.info(f"[{self.call_uuid}] No explicit consent heard. Proceeding to LISTEN state.")
+        self.session_state.has_consented = True
 
     async def _state_listen(self) -> Optional[bytes]:
         """State 3: Listen for caller utterance with VAD."""
-        logger.info(f"[{self.call_uuid}] State: LISTEN (Turn {self.session_state.turn_count + 1})")
-        await self.conn.drain_input()
+        turn_num = self.session_state.turn_count + 1
+        print(f"\n👂 [STATE: LISTEN] Turn #{turn_num} | Listening for caller voice (Threshold: {self.endpointer.energy_threshold})...", flush=True)
+        self.conn.drain_audio_buffer()
         self.endpointer.reset()
-        self.endpointer.initial_silence_timeout_sec = 8.0
+        self.endpointer.initial_silence_timeout_sec = 10.0
         speech_pcm = await self._collect_speech_frames()
 
-        if not speech_pcm or len(speech_pcm) < 3200:  # < 200ms
+        if not speech_pcm or len(speech_pcm) < 3200:
+            if not self.conn.is_active:
+                return None
             self.session_state.consecutive_silence_count += 1
-            logger.info(
-                f"[{self.call_uuid}] No speech detected (silence count: {self.session_state.consecutive_silence_count})"
-            )
+            print(f"⚠️ [SILENCE] No speech detected (consecutive silence: {self.session_state.consecutive_silence_count})", flush=True)
             if self.session_state.consecutive_silence_count < 2:
-                # Prompt caller to speak
                 await self._play_prompt("repeat_prompt", self.session_state.language)
-                await self.conn.drain_input()
             return None
 
         return speech_pcm
 
     async def _state_think(self):
         """State 4: Play immediate thinking cue ("One moment...")."""
-        logger.info(f"[{self.call_uuid}] State: THINK")
+        print("🤔 [STATE: THINK] Processing... Playing 'one moment' prompt.", flush=True)
         await self._play_prompt("one_moment", self.session_state.language)
 
     async def _state_speak(self, audio_pcm: bytes):
         """State 5: Run AI pipeline, check confidence, stream answer back."""
-        logger.info(f"[{self.call_uuid}] State: SPEAK - processing utterance...")
+        print(f"🧠 [STATE: SPEAK] Processing caller utterance ({len(audio_pcm)} bytes)...", flush=True)
         start_t = time.perf_counter()
 
-        # Run pipeline
         response = await process_utterance(
             audio_bytes=audio_pcm,
             session=self.session_state,
-            text_override=None
+            text_override=None,
+            synthesize_audio=True
         )
 
         duration_ms = (time.perf_counter() - start_t) * 1000
-        logger.info(f"[{self.call_uuid}] Utterance processed in {duration_ms:.1f}ms. Grounded: {response.metadata.grounded}")
+        print(f"\n=======================================================", flush=True)
+        print(f"📝 [STT TRANSCRIPT] '{response.metadata.answer_en_gloss}'", flush=True)
+        print(f"💡 [AI ANSWER TEXT] '{response.text}'", flush=True)
+        print(f"⏱️ [TOTAL LATENCY]  {duration_ms:.1f}ms | Confidence: {response.metadata.confidence}", flush=True)
+        print(f"=======================================================", flush=True)
 
         # Check for Low Confidence / Empty STT
-        if response.metadata.confidence < 0.4 or not response.text.strip():
+        if response.metadata.confidence < 0.2 or not response.text.strip():
             self.consecutive_low_conf_count += 1
-            logger.warning(f"[{self.call_uuid}] Low confidence turn (count: {self.consecutive_low_conf_count})")
+            print(f"⚠️ [LOW CONFIDENCE] Count: {self.consecutive_low_conf_count}", flush=True)
             if self.consecutive_low_conf_count >= 2:
-                logger.info(f"[{self.call_uuid}] 2 low-confidence turns. Playing referral and terminating.")
+                print("📴 [CALL END] Repeated low confidence. Playing referral and terminating.", flush=True)
                 await self._play_prompt("safe_fallback", self.session_state.language)
                 await self._play_prompt("goodbye", self.session_state.language)
                 await self.conn.hangup()
                 return
             else:
                 await self._play_prompt("repeat_prompt", self.session_state.language)
-                await self.conn.drain_input()
                 return
 
         self.consecutive_low_conf_count = 0
 
         # Stream Audio Answer Back to Asterisk
         if response.audio and len(response.audio) > 0:
-            logger.info(f"[{self.call_uuid}] Streaming {len(response.audio)} bytes of audio answer to caller...")
+            print(f"🔊 [AUDIO STREAMING] Sending {len(response.audio)} bytes ({len(response.audio)/16000:.1f}s) to Asterisk...", flush=True)
             await self.conn.send_audio(response.audio)
+            print(f"✅ [AUDIO STREAMED] Playback complete. Moving to next turn.\n", flush=True)
+            self.conn.drain_audio_buffer()
         else:
-            # Fallback to pre-rendered safe fallback if audio synthesis failed
-            logger.warning(f"[{self.call_uuid}] Response audio empty, streaming safe fallback audio.")
+            print("⚠️ [AUDIO EMPTY] Falling back to pre-rendered audio.", flush=True)
             await self._play_prompt("safe_fallback", self.session_state.language)
-
-        await self.conn.drain_input()
+            self.conn.drain_audio_buffer()
 
     async def _collect_speech_frames(self) -> Optional[bytes]:
         """Read 20ms audio frames from AudioSocket connection and feed VAD endpointer."""
-        total_audio_frames = 0
+        frame_idx = 0
+        speech_started = False
+
         while self.conn.is_active:
             frame = await self.conn.read_frame()
             if not frame:
-                return None
-
-            msg_type, payload = frame
-            # 0x00 is Asterisk's AUDIOSOCKET_TYPE_TERMINATE (Hangup)
-            if msg_type == 0x00:
-                logger.info(f"[{self.call_uuid}] Caller hung up (0x00 terminate received).")
                 self.conn.is_active = False
                 return None
 
-            # 0x01 is UUID frame - ignore during speech collection
-            if msg_type == 0x01:
-                logger.debug(f"[{self.call_uuid}] Ignoring AudioSocket UUID frame during listening.")
-                continue
+            msg_type, payload = frame
+            # 0x00 is the official AudioSocket hangup signal
+            if msg_type == TYPE_HANGUP:
+                print(f"📴 [CALL EVENT] Caller hung up.", flush=True)
+                self.conn.is_active = False
+                return None
 
-            # 0x03 is DTMF / error frame
-            if msg_type == 0x03:
-                logger.info(f"[{self.call_uuid}] Received DTMF/control frame: {payload.hex()}")
-                continue
-
-            if msg_type in (TYPE_AUDIO, 0x10, 0x02):
-                total_audio_frames += 1
+            # Audio types: 0x10 is 8kHz SLIN, 0x11-0x18 higher SLIN rates
+            if msg_type in (TYPE_AUDIO, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18):
+                frame_idx += 1
                 endpoint_state = self.endpointer.process_frame(payload)
+                rms = getattr(self.endpointer, "last_rms", 0)
+
+                # Responsive live energy meter every 10 frames (200ms) while waiting
+                if endpoint_state == EndpointState.WAITING_FOR_SPEECH and frame_idx % 10 == 0:
+                    bars = "█" * min(15, max(1, rms // 30))
+                    print(f"   [MIC METER 🎤] Frame #{frame_idx:04d} | RMS: {rms:4d} | Level: {bars:<15} | Waiting for speech...", flush=True)
+
+                if endpoint_state == EndpointState.SPEECH_IN_PROGRESS:
+                    if not speech_started:
+                        speech_started = True
+                        print(f"\n🟢 [SPEECH DETECTED 🗣️] Energy RMS {rms} >= {self.endpointer.energy_threshold}! Recording caller...", flush=True)
+                    elif frame_idx % 10 == 0:
+                        bars = "█" * min(20, max(1, rms // 30))
+                        print(f"   [RECORDING 🎙️] Frame #{frame_idx:04d} | RMS: {rms:4d} | {bars}", flush=True)
 
                 if endpoint_state == EndpointState.SPEECH_ENDED:
                     pcm = self.endpointer.get_speech_pcm()
-                    logger.info(f"[{self.call_uuid}] Speech utterance detected ({len(pcm)} bytes, {total_audio_frames} frames).")
+                    print(f"🔴 [SPEECH ENDED ⏹️] Captured {len(pcm)} bytes ({len(pcm)/16000:.2f}s of caller audio).", flush=True)
                     return pcm
 
                 elif endpoint_state in (
@@ -297,8 +276,9 @@ class CallStateMachine:
                     EndpointState.MAX_DURATION_EXCEEDED,
                 ):
                     pcm = self.endpointer.get_speech_pcm()
-                    logger.info(f"[{self.call_uuid}] Endpoint reached: {endpoint_state.value} ({len(pcm)} bytes).")
-                    return pcm if len(pcm) > 0 else None
+                    if len(pcm) > 0:
+                        print(f"⏱️ [VAD TIMEOUT] Returning {len(pcm)} bytes of speech audio.", flush=True)
+                        return pcm
+                    return None
 
         return None
-

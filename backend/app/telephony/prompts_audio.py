@@ -30,17 +30,10 @@ def get_prompt_pcm(name: str, language: str = "am") -> bytes:
     filepath = PROMPTS_DIR / filename
 
     if not filepath.exists():
-        # Try language fallback to Amharic
+        # Fallback to bilingual or amharic
         filepath = PROMPTS_DIR / f"{name}_am.wav"
-
-    if not filepath.exists() and name == "repeat_prompt":
-        # Fallback repeat_prompt to low_confidence prompt
-        filepath = PROMPTS_DIR / f"low_confidence_{language}.wav"
         if not filepath.exists():
-            filepath = PROMPTS_DIR / "low_confidence_am.wav"
-
-    if not filepath.exists() and name == "greeting":
-        filepath = PROMPTS_DIR / "greeting_bilingual.wav"
+            filepath = PROMPTS_DIR / "greeting_bilingual.wav"
 
     if filepath.exists():
         try:
@@ -52,4 +45,3 @@ def get_prompt_pcm(name: str, language: str = "am") -> bytes:
             return b""
 
     return b""
-

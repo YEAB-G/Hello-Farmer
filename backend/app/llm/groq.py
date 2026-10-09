@@ -17,9 +17,9 @@ logger = logging.getLogger(__name__)
 class GroqLLMProvider(BaseLLMProvider):
     """Groq API fallback provider."""
 
-    def __init__(self, api_key: str | None = None, model: str = "llama-3.3-70b-versatile"):
+    def __init__(self, api_key: str | None = None, model: str | None = None):
         self.api_key = api_key or settings.GROQ_API_KEY
-        self.model = model
+        self.model = model or settings.GROQ_MODEL
         self.base_url = "https://api.groq.com/openai/v1/chat/completions"
 
     async def generate_response(
@@ -54,16 +54,19 @@ class GroqLLMProvider(BaseLLMProvider):
                 {"role": "system", "content": system_msg},
                 {"role": "user", "content": user_msg}
             ],
-            "response_format": {"type": "json_object"},
             "temperature": 0.2
         }
 
-        async with httpx.AsyncClient(timeout=8.0) as client:
+        async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.post(self.base_url, headers=headers, json=payload)
             resp.raise_for_status()
             data = resp.json()
             content = data["choices"][0]["message"]["content"]
-            parsed = json.loads(content)
+            if "```" in content:
+                content = content.split("```")[1]
+                if content.startswith("json"):
+                    content = content[4:]
+            parsed = json.loads(content.strip())
             return LLMAnswer(
                 answer=parsed.get("answer", "").strip(),
                 answer_en_gloss=parsed.get("answer_en_gloss", "").strip(),

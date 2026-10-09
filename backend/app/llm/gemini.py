@@ -24,7 +24,12 @@ class GeminiLLMProvider(BaseLLMProvider):
 
     def __init__(self, api_key: str | None = None, model_name: str | None = None):
         self.api_key = api_key or settings.GEMINI_API_KEY
-        self.model_name = model_name or settings.LLM_MODEL or "gemini-2.5-flash"
+        m = model_name or getattr(settings, "LLM_MODEL", "gemini-flash-latest")
+        if "gemini-2.5-flash" in m:
+            m = "gemini-flash-latest"
+        self.model_name = m
+
+
         self._client = None
         self._initialized = False
 
@@ -73,22 +78,23 @@ class GeminiLLMProvider(BaseLLMProvider):
 
         full_prompt = f"{system_instruction}\n\n{user_prompt}"
 
-        # Attempt 1 with 8.0s timeout
+        # Attempt 1 with 25.0s timeout
         try:
             raw_text = await asyncio.wait_for(
                 self._async_generate(full_prompt),
-                timeout=8.0
+                timeout=25.0
             )
             return self._parse_json_response(raw_text)
         except (asyncio.TimeoutError, json.JSONDecodeError, ValueError) as err:
             logger.warning(f"Gemini attempt 1 failed ({err}), retrying once with repair prompt...")
 
-        # Attempt 2 (Repair prompt) with 8.0s timeout
+        # Attempt 2 (Repair prompt) with 25.0s timeout
         repair_full = f"{full_prompt}\n\n{REPAIR_PROMPT}"
         raw_text_retry = await asyncio.wait_for(
             self._async_generate(repair_full),
-            timeout=8.0
+            timeout=25.0
         )
+
         return self._parse_json_response(raw_text_retry)
 
     async def _async_generate(self, prompt: str) -> str:

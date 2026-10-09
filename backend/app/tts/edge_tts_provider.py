@@ -22,8 +22,8 @@ logger = logging.getLogger("hello_farmer.tts.edge")
 class EdgeTTSProvider(BaseTTSProvider):
     """Edge-TTS provider. Mark: PROTOTYPE ONLY."""
 
-    DEFAULT_AMHARIC_VOICE = "am-ET-AmehaNeural"
-    DEFAULT_OROMO_VOICE = "am-ET-AmehaNeural"  # Fallback: edge-tts lacks native om-ET voice
+    DEFAULT_AMHARIC_VOICE = "am-ET-MekdesNeural"
+    DEFAULT_OROMO_VOICE = "am-ET-MekdesNeural"  # Fallback: edge-tts lacks native om-ET voice
 
     def __init__(self, cache_dir: str = "backend/cache/tts"):
         super().__init__(cache_dir=cache_dir)
@@ -36,7 +36,7 @@ class EdgeTTSProvider(BaseTTSProvider):
         )
 
         try:
-            communicate = edge_tts.Communicate(text, selected_voice)
+            communicate = edge_tts.Communicate(text, selected_voice, rate="-4%")
             mp3_buffer = io.BytesIO()
             async for chunk in communicate.stream():
                 if chunk["type"] == "audio":

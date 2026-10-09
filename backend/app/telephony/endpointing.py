@@ -1,10 +1,11 @@
 """Audio endpointing and Voice Activity Detection (VAD) for 8 kHz telephony streams.
 
 Processes 20ms frames (160 samples / 320 bytes of 8 kHz 16-bit PCM).
-Detects start of speech, tracks continuous voice activity, and triggers
-speech-ended when post-speech silence exceeds configurable threshold (e.g. 1000ms).
+Uses audio-time frame tracking (20ms per frame) for immune network jitter detection,
+pre-roll pad for preserving onset consonants, and clean silence trimming.
 """
 import audioop
+import collections
 import enum
 import time
 from typing import Optional
@@ -21,19 +22,26 @@ class EndpointState(enum.Enum):
 class VADEndpointer:
     """Accumulates incoming 8 kHz 16-bit mono PCM frames and detects utterance boundaries."""
 
+    FRAME_MS = 20  # 320 bytes = 160 samples at 8kHz 16-bit PCM = 20ms
+
     def __init__(
         self,
-        energy_threshold: int = 400,
-        min_speech_ms: int = 250,
-        silence_timeout_ms: int = 1000,
+        energy_threshold: int = 700,
+        min_speech_ms: int = 200,
+        silence_timeout_ms: int = 800,
         initial_silence_timeout_sec: float = 10.0,
-        max_utterance_sec: float = 30.0,
+        max_utterance_sec: float = 15.0,
     ):
         self.energy_threshold = energy_threshold
         self.min_speech_ms = min_speech_ms
         self.silence_timeout_ms = silence_timeout_ms
         self.initial_silence_timeout_sec = initial_silence_timeout_sec
         self.max_utterance_sec = max_utterance_sec
+        self.last_rms = 0
+        self.last_is_voiced = False
+
+        # Pre-roll ring buffer (keep last 200ms = 10 frames before speech onset)
+        self.pre_roll = collections.deque(maxlen=10)
 
         self.reset()
 
@@ -41,10 +49,14 @@ class VADEndpointer:
         """Reset state for a new listening turn."""
         self.state = EndpointState.WAITING_FOR_SPEECH
         self.speech_frames: list[bytes] = []
+        self.pre_roll.clear()
         self.start_time: float = time.monotonic()
-        self.speech_start_time: Optional[float] = None
-        self.silence_start_time: Optional[float] = None
+        self.voiced_ms: int = 0
+        self.silence_ms: int = 0
+        self.total_audio_ms: int = 0
         self.has_voiced = False
+        self.last_rms = 0
+        self.last_is_voiced = False
 
     def process_frame(self, frame_bytes: bytes, current_time: Optional[float] = None) -> EndpointState:
         """Process a 20ms (320 bytes) 8 kHz 16-bit PCM frame.
@@ -58,46 +70,58 @@ class VADEndpointer:
         # Compute RMS energy of 16-bit mono PCM
         rms = audioop.rms(frame_bytes, 2)
         is_voiced = rms >= self.energy_threshold
+        self.last_rms = rms
+        self.last_is_voiced = is_voiced
+        self.total_audio_ms += self.FRAME_MS
 
         if self.state == EndpointState.WAITING_FOR_SPEECH:
             if is_voiced:
                 self.state = EndpointState.SPEECH_IN_PROGRESS
-                self.speech_start_time = now
-                self.speech_frames.append(frame_bytes)
-                self.silence_start_time = None
                 self.has_voiced = True
+                self.voiced_ms = self.FRAME_MS
+                self.silence_ms = 0
+                # Prepend pre-roll frames so onset consonants (e.g. 'p', 't', 'k') are preserved
+                self.speech_frames.extend(list(self.pre_roll))
+                self.speech_frames.append(frame_bytes)
             else:
-                # Check initial silence timeout
-                if now - self.start_time >= self.initial_silence_timeout_sec:
+                self.pre_roll.append(frame_bytes)
+                # Check initial silence timeout (both wall-clock and audio stream)
+                if (now - self.start_time >= self.initial_silence_timeout_sec) or (
+                    self.total_audio_ms >= int(self.initial_silence_timeout_sec * 1000)
+                ):
                     self.state = EndpointState.INITIAL_SILENCE_TIMEOUT
                     return self.state
 
         elif self.state == EndpointState.SPEECH_IN_PROGRESS:
             self.speech_frames.append(frame_bytes)
 
-            # Check max utterance limit
-            if now - self.start_time >= self.max_utterance_sec:
+            # Check max utterance limit (15s)
+            if self.total_audio_ms >= int(self.max_utterance_sec * 1000):
                 self.state = EndpointState.MAX_DURATION_EXCEEDED
                 return self.state
 
             if is_voiced:
-                self.silence_start_time = None
+                self.voiced_ms += self.FRAME_MS
+                self.silence_ms = 0
             else:
-                if self.silence_start_time is None:
-                    self.silence_start_time = now
-                else:
-                    silence_duration_ms = (now - self.silence_start_time) * 1000
-                    start_t = self.speech_start_time if self.speech_start_time is not None else now
-                    speech_duration_ms = (now - start_t) * 1000
-                    if (
-                        silence_duration_ms >= self.silence_timeout_ms
-                        and speech_duration_ms >= self.min_speech_ms
-                    ):
-                        self.state = EndpointState.SPEECH_ENDED
-                        return self.state
+                self.silence_ms += self.FRAME_MS
+                # If caller was speaking and is now silent for silence_timeout_ms (e.g. 800ms)
+                if (
+                    self.silence_ms >= self.silence_timeout_ms
+                    and self.voiced_ms >= self.min_speech_ms
+                ):
+                    self.state = EndpointState.SPEECH_ENDED
+                    return self.state
 
         return self.state
 
     def get_speech_pcm(self) -> bytes:
-        """Return all accumulated 8 kHz 16-bit PCM bytes for the utterance."""
-        return b"".join(self.speech_frames)
+        """Return accumulated 8 kHz 16-bit PCM bytes for the utterance, trimming trailing silence."""
+        # Trim trailing silence frames exceeding 200ms
+        excess_silence_frames = max(0, (self.silence_ms - 200) // self.FRAME_MS)
+        if excess_silence_frames > 0 and len(self.speech_frames) > excess_silence_frames:
+            frames_to_return = self.speech_frames[:-excess_silence_frames]
+        else:
+            frames_to_return = self.speech_frames
+        return b"".join(frames_to_return)
+

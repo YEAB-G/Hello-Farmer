@@ -31,10 +31,16 @@ class BaseEmbeddingProvider(ABC):
 class GeminiEmbeddingProvider(BaseEmbeddingProvider):
     """Google Gemini text embedding provider."""
 
-    def __init__(self, api_key: str | None = None, model_name: str = "models/text-embedding-004"):
+    def __init__(self, api_key: str | None = None, model_name: str | None = None):
         self.api_key = api_key or settings.GEMINI_API_KEY
-        self.model_name = model_name
-        self._dim = 768  # text-embedding-004 default dimension
+        m = model_name or getattr(settings, "EMBEDDING_MODEL", "gemini-embedding-001")
+        if "text-embedding-004" in m or "bge-m3" in m:
+            m = "gemini-embedding-001"
+        if not m.startswith("models/"):
+            m = f"models/{m}"
+        self.model_name = m
+        self._dim = 768  # vector dimension
+
 
         self._configured = False
         if self.api_key and self.api_key != "your_gemini_api_key_here":
@@ -64,13 +70,15 @@ class GeminiEmbeddingProvider(BaseEmbeddingProvider):
                 result = genai.embed_content(
                     model=self.model_name,
                     content=text,
-                    task_type="retrieval_document"
+                    task_type="retrieval_document",
+                    output_dimensionality=self._dim,
                 )
                 vectors.append(result["embedding"])
             return vectors
         except Exception as e:
             logger.error(f"Gemini embedding API error: {e}")
             return [self._offline_hash_embedding(t) for t in texts]
+
 
     def _offline_hash_embedding(self, text: str) -> list[float]:
         """Deterministic pseudo-semantic projection for offline test coverage."""

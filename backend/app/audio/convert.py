@@ -65,6 +65,7 @@ def audio_stream_to_pcm8k(audio_bytes: bytes) -> bytes:
                 "-hide_banner",
                 "-loglevel", "error",
                 "-i", "pipe:0",
+                "-af", "volume=1.5,lowpass=f=3800",
                 "-f", "s16le",
                 "-acodec", "pcm_s16le",
                 "-ac", "1",
