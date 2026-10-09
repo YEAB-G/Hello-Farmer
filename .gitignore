@@ -34,6 +34,10 @@ backend/cache/tts/
 eval/reports/tts_samples/
 *.tmp
 *.log
+test_*.wav
+call_recording_*.wav
+knowledge_base/temp_downloads/*.tmp
+
 
 # OS & IDE
 .DS_Store
