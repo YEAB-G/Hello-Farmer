@@ -1,10 +1,19 @@
-import asyncio
-import io
-import wave
-import httpx
-from app.config import settings
-from app.audio.convert import audio_stream_to_pcm8k, pcm8k_to_pcm16k
+import os
+import sys
+
+# Ensure backend directory is in path
+sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+try:
+    from app.config import settings
+    from app.audio.convert import audio_stream_to_pcm8k, pcm8k_to_pcm16k
+except ImportError:
+    from backend.app.config import settings
+    from backend.app.audio.convert import audio_stream_to_pcm8k, pcm8k_to_pcm16k
+
 import edge_tts
+
 
 async def run():
     text_in = "በቆሎ ላይ ተምች ወደቀብኝ ምን ላድርግ?"
