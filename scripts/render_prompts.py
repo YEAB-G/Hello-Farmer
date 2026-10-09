@@ -96,18 +96,27 @@ PROMPTS_SPEC = {
 }
 
 
-async def render_prompts():
+import argparse
+
+
+async def render_prompts(lang_filter: str = "all", target_dir: str = "backend/cache/prompts"):
     print("=" * 80)
-    print("HELLO FARMER: RENDERING FIXED TELEPHONY PROMPT WAVs (PHASE 2)")
+    print("HELLO FARMER: RENDERING FIXED TELEPHONY PROMPT WAVs")
+    print(f"Filter language: {lang_filter} | Output directory: {target_dir}")
     print("=" * 80)
 
-    prompt_dir = Path("backend/cache/prompts")
+    prompt_dir = Path(target_dir)
     prompt_dir.mkdir(parents=True, exist_ok=True)
 
     tts_provider = EdgeTTSProvider(cache_dir="backend/cache/tts")
     success_count = 0
 
-    for filename, spec in PROMPTS_SPEC.items():
+    items_to_render = {
+        k: v for k, v in PROMPTS_SPEC.items()
+        if lang_filter == "all" or v.get("lang") == lang_filter
+    }
+
+    for filename, spec in items_to_render.items():
         out_path = prompt_dir / filename
         pcm_8k = await tts_provider.synthesize(
             spec["text"],
@@ -125,10 +134,16 @@ async def render_prompts():
             print(f"  ✗ Failed to render {filename}")
 
     print("-" * 80)
-    print(f"Successfully rendered {success_count} / {len(PROMPTS_SPEC)} fixed prompts.")
+    print(f"Successfully rendered {success_count} / {len(items_to_render)} prompts.")
     print(f"Prompts stored at: {prompt_dir}")
     print("=" * 80)
 
 
 if __name__ == "__main__":
-    asyncio.run(render_prompts())
+    parser = argparse.ArgumentParser(description="Render Hello Farmer telephony prompts")
+    parser.add_argument("--lang", choices=["am", "om", "all"], default="all", help="Language filter")
+    parser.add_argument("--output-dir", default="backend/cache/prompts", help="Destination prompt directory")
+    args = parser.parse_args()
+
+    asyncio.run(render_prompts(lang_filter=args.lang, target_dir=args.output_dir))
+
