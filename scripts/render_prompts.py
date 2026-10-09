@@ -18,37 +18,37 @@ PROMPTS_SPEC = {
     # Amharic Prompts
     "greeting_am.wav": {
         "lang": "am",
-        "voice": "am-ET-AmehaNeural",
+        "voice": "am-ET-MekdesNeural",
         "text": "እንኳን ወደ ሄሎ ፋርመር የሙከራ የግብርና ረዳት በደህና መጡ። ጥያቄዎን በቀጥታ መናገር ይችላሉ።",
     },
     "consent_am.wav": {
         "lang": "am",
-        "voice": "am-ET-AmehaNeural",
+        "voice": "am-ET-MekdesNeural",
         "text": "ይህ አገልግሎት እንዲሻሻል ጥያቄዎ እንዲቀመጥ ይፈቅዳሉ?",
     },
     "one_moment_am.wav": {
         "lang": "am",
-        "voice": "am-ET-AmehaNeural",
+        "voice": "am-ET-MekdesNeural",
         "text": "እባክዎ ትንሽ ይጠብቁ...",
     },
     "low_confidence_am.wav": {
         "lang": "am",
-        "voice": "am-ET-AmehaNeural",
+        "voice": "am-ET-MekdesNeural",
         "text": "ይቅርታ፣ ድምጽዎ በደንብ አልተሰማም። እባክዎ ጥያቄዎን በድጋሚ ይናገሩ።",
     },
     "safe_fallback_am.wav": {
         "lang": "am",
-        "voice": "am-ET-AmehaNeural",
+        "voice": "am-ET-MekdesNeural",
         "text": "ይቅርታ፣ ለዚህ ጥያቄ በቂ የተረጋገጠ መረጃ አላገኘሁም። እባክዎ የአካባቢዎን የግብርና ልማት ጣቢያ ባለሙያ ያማክሩ ወይም በስምንት ዜሮ ሁለት ስምንት ይደውሉ።",
     },
     "goodbye_am.wav": {
         "lang": "am",
-        "voice": "am-ET-AmehaNeural",
+        "voice": "am-ET-MekdesNeural",
         "text": "ስለደወሉ እናመሰግናለን። ደህና ይሁኑ።",
     },
     "error_am.wav": {
         "lang": "am",
-        "voice": "am-ET-AmehaNeural",
+        "voice": "am-ET-MekdesNeural",
         "text": "ይቅርታ፣ የስርዓት መቆራረጥ አጋጥሟል። እባክዎ የአካባቢዎን የግብርና ባለሙያ ያማክሩ።",
     },
     # Afaan Oromo Prompts
