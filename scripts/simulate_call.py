@@ -18,9 +18,9 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("simulate_call")
 
-TYPE_HANGUP = 0x01
-TYPE_AUDIO = 0x02
-TYPE_ERROR = 0x03
+TYPE_HANGUP = 0x00
+TYPE_AUDIO = 0x10
+TYPE_ERROR = 0x01
 
 
 class DuplexAudioSocketClient:
@@ -54,7 +54,7 @@ class DuplexAudioSocketClient:
                 header = await self.reader.readexactly(3)
                 msg_type, length = struct.unpack("!BH", header)
                 payload = await self.reader.readexactly(length) if length > 0 else b""
-                if msg_type == TYPE_AUDIO:
+                if msg_type in (TYPE_AUDIO, 0x10, 0x02):
                     self.total_received_bytes += len(payload)
                 elif msg_type == TYPE_HANGUP:
                     logger.info("Received HANGUP signal from AudioSocket server.")

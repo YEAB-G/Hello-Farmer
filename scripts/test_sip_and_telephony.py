@@ -14,8 +14,8 @@ import sys
 import time
 import uuid
 
-TYPE_HANGUP = 0x01
-TYPE_AUDIO = 0x02
+TYPE_HANGUP = 0x00
+TYPE_AUDIO = 0x10
 
 
 def test_sip_signaling(host: str = "asterisk", port: int = 5060) -> bool:

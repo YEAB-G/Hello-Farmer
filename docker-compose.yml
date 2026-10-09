@@ -97,6 +97,11 @@ services:
       - "5060:5060/udp"
       - "5060:5060/tcp"
       - "10000-10020:10000-10020/udp"
+    volumes:
+      - ./asterisk/pjsip.conf:/etc/asterisk/pjsip.conf
+      - ./asterisk/extensions.conf:/etc/asterisk/extensions.conf
+      - ./asterisk/modules.conf:/etc/asterisk/modules.conf
+      - ./asterisk/rtp.conf:/etc/asterisk/rtp.conf
     depends_on:
       backend:
         condition: service_healthy

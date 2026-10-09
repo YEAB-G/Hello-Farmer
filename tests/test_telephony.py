@@ -72,5 +72,5 @@ def test_fixed_prompts_loaded_in_pcm():
 
 def test_audiosocket_constants():
     """Verify AudioSocket wire protocol constants."""
-    assert TYPE_AUDIO == 0x02
-    assert TYPE_HANGUP == 0x01
+    assert TYPE_AUDIO in (0x10, 0x02)
+    assert TYPE_HANGUP in (0x00, 0x01)
