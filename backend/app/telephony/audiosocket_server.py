@@ -15,9 +15,18 @@ import uuid
 
 logger = logging.getLogger("hello_farmer.audiosocket")
 
-TYPE_HANGUP = 0x01
-TYPE_AUDIO = 0x02
-TYPE_ERROR = 0x03
+# Asterisk res_audiosocket.c protocol constants:
+# 0x00 = Hangup / connection termination
+# 0x01 = UUID frame
+# 0x02 = Silence / alternate audio
+# 0x03 = DTMF / control frame
+# 0x10 = 16-bit 8kHz signed linear mono audio
+TYPE_HANGUP = 0x00
+TYPE_UUID = 0x01
+TYPE_SILENCE = 0x02
+TYPE_DTMF = 0x03
+TYPE_AUDIO = 0x10
+TYPE_ERROR = 0x01  # backward compatibility
 
 
 class AudioSocketConnection:
@@ -28,10 +37,28 @@ class AudioSocketConnection:
         self.is_active = True
 
     async def initialize(self):
-        """Read initial 16-byte UUID handshake from Asterisk."""
+        """Read initial UUID handshake from Asterisk.
+        
+        Asterisk res_audiosocket sends a standard 19-byte frame on connection:
+          - 1 byte: 0x01 (TYPE_UUID)
+          - 2 bytes: 0x0010 (payload length = 16 in big-endian)
+          - 16 bytes: binary RFC 4122 UUID
+        We also support raw 16-byte streams from legacy test harnesses.
+        """
         try:
-            uuid_bytes = await self.reader.readexactly(16)
-            self.call_uuid = str(uuid.UUID(bytes=uuid_bytes))
+            header = await self.reader.readexactly(3)
+            msg_type, length = struct.unpack("!BH", header)
+            if msg_type == TYPE_UUID and length == 16:
+                uuid_bytes = await self.reader.readexactly(16)
+                self.call_uuid = str(uuid.UUID(bytes=uuid_bytes))
+            elif length == 16:
+                uuid_bytes = await self.reader.readexactly(16)
+                self.call_uuid = str(uuid.UUID(bytes=uuid_bytes))
+            else:
+                # Raw 16-byte UUID where header is the first 3 bytes of the UUID
+                remaining = await self.reader.readexactly(13)
+                uuid_bytes = header + remaining
+                self.call_uuid = str(uuid.UUID(bytes=uuid_bytes))
             logger.info(f"AudioSocket call initialized with UUID: {self.call_uuid}")
         except Exception as e:
             logger.error(f"Failed to read AudioSocket UUID handshake: {e}")
@@ -39,6 +66,8 @@ class AudioSocketConnection:
 
     async def read_frame(self) -> tuple[int, bytes] | None:
         """Read a single AudioSocket protocol frame."""
+        if not self.is_active or self.reader.at_eof():
+            return None
         try:
             header = await self.reader.readexactly(3)
             msg_type, length = struct.unpack("!BH", header)
@@ -52,18 +81,47 @@ class AudioSocketConnection:
             self.is_active = False
             return None
 
-    async def send_audio(self, pcm_data: bytes):
-        """Send 8 kHz signed linear mono PCM audio chunk to Asterisk."""
+    async def drain_input(self):
+        """Discard any audio frames that queued up while server was speaking prompt audio."""
+        if not self.is_active or self.reader.at_eof():
+            return
+        drained_bytes = 0
+        try:
+            while True:
+                # Read with a tiny 5ms timeout to quickly flush buffered frames
+                frame = await asyncio.wait_for(self.read_frame(), timeout=0.005)
+                if not frame:
+                    break
+                msg_type, payload = frame
+                if msg_type == TYPE_HANGUP:
+                    self.is_active = False
+                    break
+                drained_bytes += len(payload)
+        except asyncio.TimeoutError:
+            pass
+        except Exception as e:
+            logger.debug(f"Drain input complete: {e}")
+        if drained_bytes > 0:
+            logger.info(f"[{self.call_uuid}] Drained {drained_bytes} stale audio bytes before listening.")
+
+
+    async def send_audio(self, pcm_data: bytes, pace: bool = True):
+        """Send 8 kHz signed linear mono PCM audio chunk to Asterisk with real-time clock pacing."""
         if not self.is_active or self.writer.is_closing():
             return
         try:
-            # Chunk into max payload size (typically 320 bytes = 20ms of 8kHz 16-bit audio)
+            # Chunk into standard telephony frame (320 bytes = 20ms of 8kHz 16-bit linear PCM)
             chunk_size = 320
             for i in range(0, len(pcm_data), chunk_size):
+                if not self.is_active or self.writer.is_closing():
+                    break
                 chunk = pcm_data[i:i + chunk_size]
                 header = struct.pack("!BH", TYPE_AUDIO, len(chunk))
                 self.writer.write(header + chunk)
                 await self.writer.drain()
+                if pace:
+                    # 19ms sleep ensures steady 20ms frame delivery matching Asterisk clock
+                    await asyncio.sleep(0.019)
         except Exception as e:
             logger.error(f"Error sending audio frame to Asterisk: {e}")
             self.is_active = False

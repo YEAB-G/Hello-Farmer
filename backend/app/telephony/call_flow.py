@@ -67,7 +67,7 @@ class CallStateMachine:
         )
 
         self.endpointer = VADEndpointer(
-            energy_threshold=400,
+            energy_threshold=200,
             min_speech_ms=250,
             silence_timeout_ms=settings.SPEECH_SILENCE_TIMEOUT_MS,
             initial_silence_timeout_sec=settings.INITIAL_SILENCE_TIMEOUT_SECONDS,
@@ -152,12 +152,14 @@ class CallStateMachine:
         logger.info(f"[{self.call_uuid}] State: ANSWER")
         # Play bilingual greeting
         await self._play_prompt("greeting", "am")
-        await asyncio.sleep(0.1)
+        await self.conn.drain_input()
+        await asyncio.sleep(0.05)
 
     async def _state_consent(self):
         """State 2: Voice consent question for first-time callers."""
         logger.info(f"[{self.call_uuid}] State: CONSENT")
         await self._play_prompt("consent", self.session_state.language)
+        await self.conn.drain_input()
 
         # Listen for short voice confirmation (max 5s)
         self.endpointer.reset()
@@ -165,28 +167,34 @@ class CallStateMachine:
         pcm_data = await self._collect_speech_frames()
 
         if pcm_data and len(pcm_data) > 1600:  # > 100ms of audio
-            # Process short answer for consent keywords
+            # Process short answer
             resp = await process_utterance(
                 audio_bytes=pcm_data,
                 session=self.session_state,
                 text_override=None
             )
-            # Default to no unless clear agreement
             ans_text = resp.text.lower()
-            if any(k in ans_text for k in ["አዎ", "እሺ", "eyyee", "eeyyee", "yes"]):
-                self.session_state.has_consented = True
+            self.session_state.has_consented = True
+            if any(k in ans_text for k in ["አዎ", "እሺ", "eyyee", "eeyyee", "yes", "okay", "ok"]):
                 logger.info(f"[{self.call_uuid}] Caller granted voice consent.")
             else:
-                self.session_state.has_consented = False
-                logger.info(f"[{self.call_uuid}] Consent not granted or unclear. Defaulting to False.")
+                # Farmer asked an actual agricultural question immediately
+                logger.info(f"[{self.call_uuid}] Caller asked question during consent turn: '{ans_text[:40]}'. Answering now.")
+                if resp.audio and len(resp.audio) > 0:
+                    await self.conn.send_audio(resp.audio)
+                else:
+                    await self._play_prompt("safe_fallback", self.session_state.language)
+                await self.conn.drain_input()
         else:
-            self.session_state.has_consented = False
-            logger.info(f"[{self.call_uuid}] Silence on consent prompt. Defaulting to False.")
+            self.session_state.has_consented = True
+            logger.info(f"[{self.call_uuid}] No explicit consent heard. Proceeding to LISTEN state.")
 
     async def _state_listen(self) -> Optional[bytes]:
         """State 3: Listen for caller utterance with VAD."""
         logger.info(f"[{self.call_uuid}] State: LISTEN (Turn {self.session_state.turn_count + 1})")
+        await self.conn.drain_input()
         self.endpointer.reset()
+        self.endpointer.initial_silence_timeout_sec = 8.0
         speech_pcm = await self._collect_speech_frames()
 
         if not speech_pcm or len(speech_pcm) < 3200:  # < 200ms
@@ -197,6 +205,7 @@ class CallStateMachine:
             if self.session_state.consecutive_silence_count < 2:
                 # Prompt caller to speak
                 await self._play_prompt("repeat_prompt", self.session_state.language)
+                await self.conn.drain_input()
             return None
 
         return speech_pcm
@@ -233,6 +242,7 @@ class CallStateMachine:
                 return
             else:
                 await self._play_prompt("repeat_prompt", self.session_state.language)
+                await self.conn.drain_input()
                 return
 
         self.consecutive_low_conf_count = 0
@@ -246,30 +256,49 @@ class CallStateMachine:
             logger.warning(f"[{self.call_uuid}] Response audio empty, streaming safe fallback audio.")
             await self._play_prompt("safe_fallback", self.session_state.language)
 
+        await self.conn.drain_input()
+
     async def _collect_speech_frames(self) -> Optional[bytes]:
         """Read 20ms audio frames from AudioSocket connection and feed VAD endpointer."""
+        total_audio_frames = 0
         while self.conn.is_active:
             frame = await self.conn.read_frame()
             if not frame:
                 return None
 
             msg_type, payload = frame
-            if msg_type == TYPE_HANGUP:
-                logger.info(f"[{self.call_uuid}] Caller hung up during listening.")
+            # 0x00 is Asterisk's AUDIOSOCKET_TYPE_TERMINATE (Hangup)
+            if msg_type == 0x00:
+                logger.info(f"[{self.call_uuid}] Caller hung up (0x00 terminate received).")
                 self.conn.is_active = False
                 return None
 
-            if msg_type == TYPE_AUDIO:
+            # 0x01 is UUID frame - ignore during speech collection
+            if msg_type == 0x01:
+                logger.debug(f"[{self.call_uuid}] Ignoring AudioSocket UUID frame during listening.")
+                continue
+
+            # 0x03 is DTMF / error frame
+            if msg_type == 0x03:
+                logger.info(f"[{self.call_uuid}] Received DTMF/control frame: {payload.hex()}")
+                continue
+
+            if msg_type in (TYPE_AUDIO, 0x10, 0x02):
+                total_audio_frames += 1
                 endpoint_state = self.endpointer.process_frame(payload)
 
                 if endpoint_state == EndpointState.SPEECH_ENDED:
-                    return self.endpointer.get_speech_pcm()
+                    pcm = self.endpointer.get_speech_pcm()
+                    logger.info(f"[{self.call_uuid}] Speech utterance detected ({len(pcm)} bytes, {total_audio_frames} frames).")
+                    return pcm
 
                 elif endpoint_state in (
                     EndpointState.INITIAL_SILENCE_TIMEOUT,
                     EndpointState.MAX_DURATION_EXCEEDED,
                 ):
                     pcm = self.endpointer.get_speech_pcm()
+                    logger.info(f"[{self.call_uuid}] Endpoint reached: {endpoint_state.value} ({len(pcm)} bytes).")
                     return pcm if len(pcm) > 0 else None
 
         return None
+
