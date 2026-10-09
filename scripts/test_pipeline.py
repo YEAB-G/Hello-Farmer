@@ -1,9 +1,21 @@
+import os
+import sys
 import asyncio
 import edge_tts
-from app.audio.convert import audio_stream_to_pcm8k
-from app.pipeline import SessionState, process_utterance
 
-async def test_full_pipeline():
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../backend")))
+
+try:
+    from backend.app.audio.convert import audio_stream_to_pcm8k
+    from backend.app.pipeline import SessionState, process_utterance
+except ImportError:
+    from app.audio.convert import audio_stream_to_pcm8k
+    from app.pipeline import SessionState, process_utterance
+
+
+async def test_full_pipeline(sample_text: str = "በቆሎ ላይ ተምች ወደቀብኝ ምን ላድርግ?", voice: str = "am-ET-MekdesNeural"):
+
     print("=" * 60)
     print("TESTING FULL PIPELINE WITH GEMINI STT + RAG + LLM + TTS")
     print("=" * 60)
