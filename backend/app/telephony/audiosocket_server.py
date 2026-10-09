@@ -134,23 +134,4 @@ class AudioSocketServer:
             self.server.close()
             await self.server.wait_closed()
             logger.info("AudioSocket TCP server stopped.")
-                from backend.app.telephony.call_flow import CallStateMachine
-            sm = CallStateMachine(conn)
-            await sm.run()
-        except Exception as e:
-            logger.error(f"Exception in call loop {conn.call_uuid}: {e}")
-        finally:
-            if conn.call_uuid in self.active_calls:
-                del self.active_calls[conn.call_uuid]
-            await conn.hangup()
-            logger.info(f"Call closed: {conn.call_uuid}. Remaining active calls: {len(self.active_calls)}")
 
-    async def start(self):
-        self.server = await asyncio.start_server(self.handle_client, self.host, self.port)
-        logger.info(f"AudioSocket TCP server listening on {self.host}:{self.port}")
-
-    async def stop(self):
-        if self.server:
-            self.server.close()
-            await self.server.wait_closed()
-            logger.info("AudioSocket TCP server stopped.")
