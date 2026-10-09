@@ -122,6 +122,10 @@ services:
       - "3000:3000"
     environment:
       - BACKEND_INTERNAL_URL=http://backend:8000
+      - WATCHPACK_POLLING=true
+    volumes:
+      - ./frontend/app:/app/app
+      - ./frontend/public:/app/public
     depends_on:
       backend:
         condition: service_healthy
