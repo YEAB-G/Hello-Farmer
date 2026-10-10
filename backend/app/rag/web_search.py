@@ -310,7 +310,7 @@ async def search_agricultural_web(
             "title": item["title"],
             "source_tier": "tier_1",
             "text": item["snippet"],
-            "score": 0.90 - (idx * 0.05),
+            "score": round(0.95 - (idx * 0.05), 2),
         })
 
     logger.info("Retrieved %d live agricultural web passages for query '%s'", len(passages), user_text)
