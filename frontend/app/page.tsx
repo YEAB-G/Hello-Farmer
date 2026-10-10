@@ -31,6 +31,14 @@ import {
   Activity,
   Layers,
   Check,
+  Clock,
+  User,
+  Users,
+  PhoneIncoming,
+  PhoneOff,
+  PieChart,
+  Calendar,
+  Filter,
 } from 'lucide-react';
 import { getTranslation, LANGUAGE_OPTIONS, SupportedLanguage } from './i18n/translations';
 
@@ -92,6 +100,22 @@ export default function HelloFarmerApp() {
   const [smsList, setSmsList] = useState<any[]>([]);
   const [analytics, setAnalytics] = useState<any>(null);
 
+  // Live Telephony & Voice Agent States
+  const [voiceAgentStatus, setVoiceAgentStatus] = useState<any>(null);
+  const [callsList, setCallsList] = useState<any[]>([]);
+  const [selectedCallId, setSelectedCallId] = useState<string | null>(null);
+  const [selectedCallDetail, setSelectedCallDetail] = useState<any | null>(null);
+  const [callDetailLoading, setCallDetailLoading] = useState<boolean>(false);
+
+  // Platform Analytics Overview States
+  const [analyticsFilterDays, setAnalyticsFilterDays] = useState<number>(30);
+  const [analyticsOverview, setAnalyticsOverview] = useState<any>(null);
+  const [analyticsLoading, setAnalyticsLoading] = useState<boolean>(false);
+
+  // Weather Locations
+  const [weatherLocations, setWeatherLocations] = useState<any[]>([]);
+  const [selectedLocationName, setSelectedLocationName] = useState<string>('Adama, East Shewa');
+
   // Yield Calculator State
   const [yieldInput, setYieldInput] = useState({
     crop: 'teff',
@@ -114,7 +138,33 @@ export default function HelloFarmerApp() {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, chatLoading]);
 
-  // Initial Data Fetch
+  // Fetch Voice Agent Status
+  const fetchVoiceAgentStatus = () => {
+    fetch('/api/backend/voice-agent/status')
+      .then((res) => res.json())
+      .then((data) => setVoiceAgentStatus(data))
+      .catch(() => {});
+  };
+
+  // Fetch Calls List
+  const fetchCallsList = () => {
+    fetch('/api/backend/calls?limit=25')
+      .then((res) => res.json())
+      .then((data) => setCallsList(data.calls || []))
+      .catch(() => {});
+  };
+
+  // Fetch Analytics Overview
+  const fetchAnalyticsOverview = (days: number) => {
+    setAnalyticsLoading(true);
+    fetch(`/api/backend/analytics/overview?days=${days}`)
+      .then((res) => res.json())
+      .then((data) => setAnalyticsOverview(data))
+      .catch(() => {})
+      .finally(() => setAnalyticsLoading(false));
+  };
+
+  // Initial Data Fetch & Polling
   useEffect(() => {
     // Fetch active warnings
     fetch('/api/backend/warnings/active')
@@ -122,13 +172,21 @@ export default function HelloFarmerApp() {
       .then((data) => setWarningsList(Array.isArray(data) ? data : []))
       .catch(() => {});
 
-    // Fetch weather forecast
+    // Fetch initial weather forecast
     setWeatherLoading(true);
     fetch('/api/backend/weather/forecast?lat=8.54&lon=39.27&location=Adama,%20East%20Shewa')
       .then((res) => res.json())
       .then((data) => setWeatherData(data))
       .catch(() => {})
       .finally(() => setWeatherLoading(false));
+
+    // Fetch weather locations
+    fetch('/api/backend/weather/locations')
+      .then((res) => res.json())
+      .then((data) => {
+        if (Array.isArray(data)) setWeatherLocations(data);
+      })
+      .catch(() => {});
 
     // Fetch farmer profile
     fetch('/api/backend/farmer/profile')
@@ -147,7 +205,46 @@ export default function HelloFarmerApp() {
       .then((res) => res.json())
       .then((data) => setAnalytics(data))
       .catch(() => {});
+
+    // Voice status & call list
+    fetchVoiceAgentStatus();
+    fetchCallsList();
+
+    // Polling voice agent status every 10s
+    const timer = setInterval(() => {
+      fetchVoiceAgentStatus();
+    }, 10000);
+    return () => clearInterval(timer);
   }, []);
+
+  // Re-fetch analytics when date filter changes
+  useEffect(() => {
+    fetchAnalyticsOverview(analyticsFilterDays);
+  }, [analyticsFilterDays]);
+
+  // Handle location change
+  const handleLocationChange = (locName: string) => {
+    setSelectedLocationName(locName);
+    const loc = weatherLocations.find((l) => l.name === locName);
+    if (!loc) return;
+    setWeatherLoading(true);
+    fetch(`/api/backend/weather/forecast?lat=${loc.lat}&lon=${loc.lon}&location=${encodeURIComponent(loc.name)}`)
+      .then((res) => res.json())
+      .then((data) => setWeatherData(data))
+      .catch(() => {})
+      .finally(() => setWeatherLoading(false));
+  };
+
+  // Handle viewing call detail transcript
+  const handleViewCallDetail = (callId: string) => {
+    setSelectedCallId(callId);
+    setCallDetailLoading(true);
+    fetch(`/api/backend/calls/${callId}`)
+      .then((res) => res.json())
+      .then((data) => setSelectedCallDetail(data))
+      .catch(() => {})
+      .finally(() => setCallDetailLoading(false));
+  };
 
   // Handle Asking Question
   const handleAsk = async (textToAsk?: string) => {
