@@ -132,3 +132,7 @@ class WeatherRiskAnalyzer:
         if forecast.daily:
             return any(d.precipitation_sum_mm >= cls.HEAVY_RAIN_THRESHOLD_MM for d in forecast.daily)
         return forecast.precipitation_sum_mm >= cls.HEAVY_RAIN_THRESHOLD_MM
+
+
+# Backward-compatibility alias
+WeatherRiskEvaluator = WeatherRiskAnalyzer
