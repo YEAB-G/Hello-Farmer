@@ -15,6 +15,9 @@ class DailyForecast(BaseModel):
     weather_code: int = 0
     is_rainy: bool = False
     is_heavy_rain: bool = False
+    day_offset: int = 0
+    temperature_max_c: float = 20.0
+    temperature_min_c: float = 12.0
 
 
 class WeatherForecast(BaseModel):
