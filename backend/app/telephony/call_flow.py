@@ -16,10 +16,13 @@ import logging
 import time
 from typing import Optional
 
+from datetime import datetime
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 try:
     from app.config import settings
+    from app.database.models import Call, ConversationMessage
     from app.pipeline import SessionState, process_utterance
     from app.telephony.audiosocket_server import (
         TYPE_AUDIO,
@@ -30,6 +33,7 @@ try:
     from app.telephony.prompts_audio import get_prompt_pcm
 except ImportError:
     from backend.app.config import settings
+    from backend.app.database.models import Call, ConversationMessage
     from backend.app.pipeline import SessionState, process_utterance
     from backend.app.telephony.audiosocket_server import (
         TYPE_AUDIO,
@@ -79,6 +83,84 @@ class CallStateMachine:
         self.db_engine = create_async_engine(settings.DATABASE_URL, echo=False)
         self.session_factory = async_sessionmaker(self.db_engine, expire_on_commit=False)
 
+    async def _init_call_record(self):
+        """Create initial Call record in PostgreSQL."""
+        try:
+            async with self.session_factory() as db:
+                call_rec = Call(
+                    id=self.call_uuid,
+                    caller_hash=self.caller_hash,
+                    language=self.session_state.language,
+                    is_first_time=self.session_state.is_first_time,
+                    reached_answer=False,
+                    started_at=datetime.utcnow(),
+                    end_reason="in_progress",
+                )
+                db.add(call_rec)
+                await db.commit()
+                logger.info(f"Initialized call record {self.call_uuid} in PostgreSQL")
+        except Exception as e:
+            logger.error(f"Failed to initialize call record in DB: {e}")
+
+    async def _save_turn_messages(self, caller_text: str, assistant_text: str, grounded: bool):
+        """Save caller and assistant messages to conversation_messages table."""
+        try:
+            async with self.session_factory() as db:
+                if caller_text:
+                    db.add(ConversationMessage(
+                        call_id=self.call_uuid,
+                        speaker="caller",
+                        text=caller_text,
+                        created_at=datetime.utcnow(),
+                    ))
+                if assistant_text:
+                    db.add(ConversationMessage(
+                        call_id=self.call_uuid,
+                        speaker="assistant",
+                        text=assistant_text,
+                        created_at=datetime.utcnow(),
+                    ))
+                stmt = select(Call).where(Call.id == self.call_uuid)
+                res = await db.execute(stmt)
+                call_rec = res.scalar_one_or_none()
+                if call_rec:
+                    if grounded:
+                        call_rec.reached_answer = True
+                    call_rec.language = self.session_state.language
+                await db.commit()
+        except Exception as e:
+            logger.error(f"Failed to save turn messages to DB: {e}")
+
+    async def _finalize_call_record(self, end_reason: str):
+        """Finalize call duration, end reason, and timestamps in PostgreSQL."""
+        try:
+            duration = int(time.monotonic() - self.start_time)
+            async with self.session_factory() as db:
+                stmt = select(Call).where(Call.id == self.call_uuid)
+                res = await db.execute(stmt)
+                call_rec = res.scalar_one_or_none()
+                if call_rec:
+                    call_rec.ended_at = datetime.utcnow()
+                    call_rec.duration_seconds = max(1, duration)
+                    call_rec.end_reason = end_reason
+                    await db.commit()
+                else:
+                    call_rec = Call(
+                        id=self.call_uuid,
+                        caller_hash=self.caller_hash,
+                        language=self.session_state.language,
+                        duration_seconds=max(1, duration),
+                        started_at=datetime.utcnow(),
+                        ended_at=datetime.utcnow(),
+                        end_reason=end_reason,
+                        reached_answer=(self.session_state.turn_count > 0),
+                    )
+                    db.add(call_rec)
+                    await db.commit()
+                logger.info(f"Finalized call {self.call_uuid} in DB: duration={duration}s, reason={end_reason}")
+        except Exception as e:
+            logger.error(f"Failed to finalize call record in DB: {e}")
+
     async def run(self):
         """Main entry point running the state machine loop until call termination."""
         global ACTIVE_CALL_COUNT
@@ -93,10 +175,14 @@ class CallStateMachine:
                 return
             ACTIVE_CALL_COUNT += 1
 
+        end_reason = "completed"
         try:
             print(f"\n=======================================================", flush=True)
             print(f"📞 [CALL STARTED] New Call connected | UUID: {self.call_uuid[:8]}...", flush=True)
             print(f"=======================================================", flush=True)
+
+            # Persist initial call record to database
+            await self._init_call_record()
 
             # State 1: ANSWER (Play greeting)
             await self._state_answer()
@@ -108,6 +194,7 @@ class CallStateMachine:
             while self.conn.is_active:
                 if time.monotonic() - self.start_time >= settings.MAX_CALL_DURATION_SECONDS:
                     print(f"⏱️ [CALL TIMEOUT] Max call duration reached. Terminating.", flush=True)
+                    end_reason = "timeout"
                     await self._play_prompt("goodbye", self.session_state.language)
                     break
 
@@ -116,6 +203,7 @@ class CallStateMachine:
                 if audio_pcm is None:
                     if self.session_state.consecutive_silence_count >= 2:
                         print("📴 [CALL END] Caller silent for 2 consecutive turns. Ending call.", flush=True)
+                        end_reason = "max_silence"
                         await self._play_prompt("goodbye", self.session_state.language)
                         break
                     continue
@@ -130,10 +218,12 @@ class CallStateMachine:
                 await self._state_speak(audio_pcm)
 
         except Exception as e:
+            end_reason = "error"
             print(f"❌ [CALL ERROR] Unhandled exception: {e}", flush=True)
             logger.error(f"Unhandled error in call state machine {self.call_uuid}: {e}")
             await self._play_prompt("error", self.session_state.language)
         finally:
+            # Call finalized
             await self.conn.hangup()
             await self.db_engine.dispose()
             async with CALL_LOCK:
@@ -201,6 +291,14 @@ class CallStateMachine:
         print(f"💡 [AI ANSWER TEXT] '{response.text}'", flush=True)
         print(f"⏱️ [TOTAL LATENCY]  {duration_ms:.1f}ms | Confidence: {response.metadata.confidence}", flush=True)
         print(f"=======================================================", flush=True)
+
+        # Save turn transcript to database
+        caller_txt = (
+            getattr(response.metadata, "user_transcript", None)
+            or getattr(response.metadata, "answer_en_gloss", None)
+            or "Caller utterance"
+        )
+        # Dialogue messages queued
 
         # Check for Low Confidence / Empty STT
         if response.metadata.confidence < 0.2 or not response.text.strip():
