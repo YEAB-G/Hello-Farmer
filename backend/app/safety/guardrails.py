@@ -175,15 +175,6 @@ def validate_and_guard(
         rejection_reasons=[],
         applied_fallback=False,
         grounded=True,
-        needs_referral=False
-    )
-
-    return GuardrailResult(
-        is_safe=True,
-        final_answer=clean_answer,
-        final_en_gloss=gloss,
-        rejection_reasons=[],
-        applied_fallback=False,
-        grounded=True,
-        needs_referral=False
+        needs_referral=False,
+        confidence=getattr(answer, "confidence", 0.95) or 0.95
     )
