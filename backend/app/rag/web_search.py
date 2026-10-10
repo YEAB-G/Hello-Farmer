@@ -101,65 +101,157 @@ AGRICULTURAL_KEYWORDS = {
     "agriculture", "farming", "crop", "crops", "pest", "pests", "soil", "farmer",
     "farmers", "yield", "disease", "fertilizer", "teff", "wheat", "maize", "fungicide",
     "pesticide", "seed", "plant", "planting", "armyworm", "rust", "weather", "spray",
+    "potato", "tomato", "onion", "garlic", "barley", "sorghum", "coffee", "bean",
     "ማዳበሪያ", "ሰብል", "እርሻ", "በሽታ", "ተባይ", "ምርት", "ጤፍ", "ስንዴ", "በቆሎ", "አፈር", "ኬሚካል", "ዝናብ",
-    "qamadii", "xaafii", "boqqoolloo", "xaa'oo", "hoomaa", "rooba"
+    "ድንች", "ቲማቲም", "ሽንኩርት", "ገብስ", "ማሽላ", "ቡና", "ባቄላ", "አተር", "ዘር", "ውሃ",
+    "qamadii", "xaafii", "boqqoolloo", "xaa'oo", "hoomaa", "rooba", "dinicha", "garbuu", "buna"
 }
 
 JUNK_KEYWORDS = {
     "youtube", "ቀሚስ", "ሙዚቃ", "ፊልም", "ዜና", "ቪዲዮ", "አየር መንገድ", "ሰበር", "መዝሙር",
-    "ቤተክርስቲያን", "song", "video", "airline", "dress", "fashion", "wedding", "qophii"
+    "ቤተክርስቲያን", "song", "video", "airline", "dress", "fashion", "wedding", "qophii", "drama"
+}
+
+# Mapping of Ethiopian agricultural terms (Amharic & Afaan Oromo) to English search keywords
+ETHIO_AGRI_TERM_MAP = {
+    # Major Crops
+    "ጤፍ": "teff agronomy",
+    "xaafii": "teff agronomy",
+    "ስንዴ": "wheat production",
+    "qamadii": "wheat production",
+    "በቆሎ": "maize corn production",
+    "boqqoolloo": "maize corn production",
+    "ገብስ": "barley farming",
+    "garbuu": "barley farming",
+    "ማሽላ": "sorghum cultivation",
+    "misingaa": "sorghum cultivation",
+    "ቡና": "coffee arabica management",
+    "buna": "coffee management",
+    "ድንች": "potato cultivation disease",
+    "dinicha": "potato cultivation disease",
+    "ቲማቲም": "tomato blight pest control",
+    "timaatima": "tomato pest management",
+    "ሽንኩርት": "onion garlic farming",
+    "qullubbii": "onion garlic farming",
+    "ባቄላ": "faba bean disease management",
+    "baaqelaa": "faba bean management",
+    "አተር": "field pea farming",
+    "atara": "field pea farming",
+    "አኩሪ አተር": "soybean cultivation",
+    "soyaa": "soybean cultivation",
+    "ጎመን": "cabbage kale pests",
+    "raafuu": "cabbage pests",
+    "በርበሬ": "pepper chili disease",
+    "barbaree": "pepper chili disease",
+    "እንስሳት": "livestock cattle feed",
+    "beeylada": "livestock feed",
+    "ላም": "dairy cow health feed",
+    "sa'a": "dairy cow feed",
+    "ዶሮ": "poultry chicken disease",
+    "lukkuu": "poultry chicken disease",
+    "ወተት": "dairy milk production",
+
+    # Farming Operations & Problems
+    "ተምች": "fall armyworm pest control maize",
+    "ትል": "stem borer caterpillar pest control",
+    "ተባይ": "pest insect infestation control advisory",
+    "ነቀዝ": "grain weevil storage pest management",
+    "ilbiisa": "pest insect infestation control",
+    "raammoo": "armyworm caterpillar control",
+    "ዋግ": "stripe yellow stem rust fungicide wheat",
+    "waagii": "wheat rust fungal disease",
+    "በሽታ": "crop disease management symptoms",
+    "dhibee": "crop disease management",
+    "dhukkuba": "crop disease control",
+    "መበስበስ": "rot blight fungal disease",
+    "ማዳበሪያ": "fertilizer NPS Urea application rate Ethiopia",
+    "xaa'oo": "fertilizer NPS Urea application rate",
+    "ዩሪያ": "Urea nitrogen fertilizer application rate",
+    "yuriyaa": "Urea fertilizer rate",
+    "ኤንፒኤስ": "NPS fertilizer rate Ethiopia crops",
+    "ዳፕ": "DAP phosphate fertilizer Ethiopia",
+    "ኮምፖስት": "compost organic manure preparation soil",
+    "kompoostii": "compost organic manure soil",
+    "ዘር": "seed rate planting spacing",
+    "sanyii": "seed rate planting spacing",
+    "መዝራት": "planting sowing season time calendar Ethiopia",
+    "facaasuu": "planting sowing season time Ethiopia",
+    "አረም": "weed weeding management herbicide",
+    "aramaa": "weed control management",
+    "ውሃ": "irrigation water requirement drought",
+    "bishaan": "irrigation water requirement",
+    "ማጠጣት": "irrigation watering schedule",
+    "jallisii": "irrigation watering schedule",
+    "ድርቅ": "drought tolerance moisture management",
+    "hongee": "drought moisture management",
+    "አፈር": "soil fertility improvement vertisol drainage",
+    "biyyoo": "soil fertility vertisol",
+    "ምርት": "crop yield increase production",
+    "midhaan": "crop yield harvesting",
+    "ማጨድ": "harvesting time maturity post-harvest",
+    "haamuu": "harvesting time maturity",
+    "ማከማቸት": "post-harvest storage grain protection",
 }
 
 
 def is_agricultural_snippet(title: str, snippet: str) -> bool:
-    """Filter out non-agricultural web search results (music, clothes, news, politics)."""
+    """Filter out explicit non-agricultural spam (music, entertainment, movies)."""
     text = f"{title} {snippet}".lower()
     for junk in JUNK_KEYWORDS:
         if junk in text:
             return False
-    return any(kw in text for kw in AGRICULTURAL_KEYWORDS)
+    # If the snippet has meaningful content, retain it
+    return len(snippet.strip()) >= 25
 
 
 def build_search_queries(user_text: str, crop: str | None = None, language: str = "am") -> list[str]:
     """Build targeted English and multilingual web search queries."""
     queries = []
 
-    # Strip common filler phrases in Amharic and Afaan Oromo
+    # Strip common conversational fillers
     cleaned = user_text
     for filler in [
         "ስለ", "ንገረኝ", "እባክህ", "እባክዎ", "ምንድን ነው", "እንዴት ነው", "ማብራሪያ", "ምን ላድርግ",
-        "maaloo", "natti himi", "akkamitti", "maal", "waa'ee"
+        "ይቻላል", "ወይ", "ናት", "ነው", "ነኝ",
+        "maaloo", "natti himi", "akkamitti", "maal", "waa'ee", "jiraa"
     ]:
         cleaned = cleaned.replace(filler, "")
     cleaned = cleaned.strip()
 
-    # If query is in Amharic script (Ethiopic Unicode \u1200-\u137F), add keyword expansions FIRST
-    has_ethiopic = any("\u1200" <= char <= "\u137F" for char in user_text)
-    if has_ethiopic:
-        if "ተምች" in user_text or "ትል" in user_text or "በቆሎ" in user_text:
-            queries.append("Ethiopia fall armyworm maize pest control advisory")
-        if "ዋግ" in user_text or "ስንዴ" in user_text:
-            queries.append("Ethiopia wheat rust disease symptoms management fungicide")
-        if "ማዳበሪያ" in user_text or "ዩሪያ" in user_text or "ዳፕ" in user_text or "ኤንፒኤስ" in user_text:
-            queries.append("Ethiopia fertilizer recommendation NPS Urea rate teff wheat maize")
-        if "ጤፍ" in user_text:
-            queries.append("Ethiopia teff row planting seed rate agronomy")
-        if "አፈር" in user_text or "ኮምፖስት" in user_text:
-            queries.append("Ethiopia integrated soil fertility management ISFM compost")
-    else:
-        user_lower = user_text.lower()
-        if "qamadii" in user_lower or "waagii" in user_lower:
-            queries.append("Ethiopia wheat rust management fungicide")
-        if "xaa'oo" in user_lower or "yuriyaa" in user_lower:
-            queries.append("Ethiopia fertilizer recommendation NPS Urea rate")
-        if "boqqoolloo" in user_lower or "hoomaa" in user_lower:
-            queries.append("Ethiopia fall armyworm maize pest control")
+    # Match Ethiopian agronomic terms to English keywords
+    matched_terms = []
+    user_lower = user_text.lower()
+    for term, expansion in ETHIO_AGRI_TERM_MAP.items():
+        if term in user_lower:
+            matched_terms.append(expansion)
 
-    # Add general fallback query
-    crop_term = f" {crop}" if crop else ""
-    queries.append(f"Ethiopia agriculture{crop_term} {cleaned} farming")
+    if matched_terms:
+        # Use top identified concepts
+        concept_query = " ".join(matched_terms[:3])
+        queries.append(f"Ethiopia {concept_query}")
+        crop_prefix = f"Ethiopia {crop} " if crop else "Ethiopia "
+        queries.append(f"{crop_prefix}{concept_query} agronomy extension")
 
-    return queries
+    # If specific crop extracted, add general advisory query for that crop
+    if crop:
+        queries.append(f"Ethiopia {crop} farming production best practices guide")
+
+    # If Romanized text or English present
+    has_roman = any("a" <= char <= "z" for char in user_lower)
+    if has_roman and cleaned:
+        queries.append(f"Ethiopia {cleaned} farming agriculture")
+
+    # Fallback broad Ethiopian agricultural query
+    queries.append(f"Ethiopia agriculture {cleaned} farming guide")
+
+    # Remove duplicates while preserving order
+    unique_queries = []
+    for q in queries:
+        q_norm = " ".join(q.split())
+        if q_norm and q_norm not in unique_queries:
+            unique_queries.append(q_norm)
+
+    return unique_queries[:3]
 
 
 async def search_agricultural_web(
@@ -170,36 +262,45 @@ async def search_agricultural_web(
 ) -> list[dict[str, Any]]:
     """Execute live web search and return vetted agricultural passages for LLM RAG."""
     queries = build_search_queries(user_text, crop=crop, language=language)
-    logger.info("Generated web search queries: %s", queries)
+    logger.info("Generated web search queries for '%s': %s", user_text, queries)
 
     all_snippets = []
     seen_texts = set()
 
-    for q in queries[:2]:
-        # Try DuckDuckGo Lite
-        ddg_results = await search_duckduckgo_lite(q, max_results=4)
-        for r in ddg_results:
-            snip = r["snippet"]
-            title = r["title"]
-            if snip not in seen_texts and len(snip) > 20 and is_agricultural_snippet(title, snip):
-                seen_texts.add(snip)
-                all_snippets.append(r)
-                if len(all_snippets) >= max_passages:
-                    break
+    for q in queries:
+        try:
+            # DuckDuckGo Lite search
+            ddg_results = await search_duckduckgo_lite(q, max_results=4)
+            for r in ddg_results:
+                snip = r["snippet"]
+                title = r["title"]
+                if snip not in seen_texts and is_agricultural_snippet(title, snip):
+                    seen_texts.add(snip)
+                    all_snippets.append(r)
+                    if len(all_snippets) >= max_passages:
+                        break
+        except Exception as e:
+            logger.warning("DuckDuckGo error on query '%s': %s", q, e)
 
         if len(all_snippets) >= max_passages:
             break
 
-        # Also check Wikipedia for agricultural terms
-        wiki_results = await search_wikipedia(q, max_results=2)
-        for r in wiki_results:
-            snip = r["snippet"]
-            title = r["title"]
-            if snip not in seen_texts and len(snip) > 20 and is_agricultural_snippet(title, snip):
-                seen_texts.add(snip)
-                all_snippets.append(r)
-                if len(all_snippets) >= max_passages:
-                    break
+        try:
+            # Wikipedia search fallback
+            wiki_results = await search_wikipedia(q, max_results=2)
+            for r in wiki_results:
+                snip = r["snippet"]
+                title = r["title"]
+                if snip not in seen_texts and is_agricultural_snippet(title, snip):
+                    seen_texts.add(snip)
+                    all_snippets.append(r)
+                    if len(all_snippets) >= max_passages:
+                        break
+        except Exception as e:
+            logger.warning("Wikipedia error on query '%s': %s", q, e)
+
+        if len(all_snippets) >= max_passages:
+            break
 
     # Format into RAG passage structure
     passages = []
