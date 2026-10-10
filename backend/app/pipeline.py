@@ -465,6 +465,6 @@ async def process_utterance(
             topic=session.extracted_crop or "agronomy",
             latency_ms=latencies,
             answer_en_gloss=safe_answer.english_gloss,
-            
+            user_transcript=user_text,
         ),
     )
