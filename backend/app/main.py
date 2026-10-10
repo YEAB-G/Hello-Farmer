@@ -211,4 +211,46 @@ async def get_voice_agent_status():
     }
 
 
+@app.get("/api/v1/calls")
+async def get_calls(limit: int = 20, offset: int = 0, language: str | None = None):
+    """Retrieve call history records with pagination and conversation messages."""
+    async with async_session_factory() as session:
+        base_stmt = select(Call)
+        count_stmt = select(func.count(Call.id))
+        if language:
+            base_stmt = base_stmt.where(Call.language == language)
+            count_stmt = count_stmt.where(Call.language == language)
+
+        total = (await session.execute(count_stmt)).scalar() or 0
+        stmt = base_stmt.options(selectinload(Call.messages)).order_by(desc(Call.started_at)).limit(limit).offset(offset)
+        res = await session.execute(stmt)
+        calls = res.scalars().all()
+
+        call_list = []
+        for c in calls:
+            first_q = None
+            last_a = None
+            if c.messages:
+                for m in c.messages:
+                    if m.speaker == "caller" and not first_q:
+                        first_q = m.text
+                    elif m.speaker == "assistant":
+                        last_a = m.text
+            call_list.append({
+                "id": c.id,
+                "caller_hash": c.caller_hash[:16] + "..." if c.caller_hash else "unknown",
+                "language": c.language or "am",
+                "is_first_time": c.is_first_time,
+                "reached_answer": c.reached_answer,
+                "duration_seconds": c.duration_seconds or 0,
+                "end_reason": c.end_reason or "completed",
+                "started_at": c.started_at.strftime("%Y-%m-%d %H:%M:%S") if c.started_at else None,
+                "ended_at": c.ended_at.strftime("%Y-%m-%d %H:%M:%S") if c.ended_at else None,
+                "turn_count": len(c.messages) // 2 if c.messages else 0,
+                "first_question": first_q,
+                "last_answer": last_a,
+            })
+        return {"total": total, "calls": call_list}
+
+
 
