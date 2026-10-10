@@ -1697,6 +1697,9 @@ export default function HelloFarmerApp() {
 
               {/* Browser Microphone Interactive Playground */}
               <div className="card-interactive" style={{ padding: '2rem', textAlign: 'center' }}>
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', padding: '0.35rem 0.85rem', backgroundColor: 'var(--bg-subtle)', borderRadius: 'var(--radius-full)', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.75rem' }}>
+                  <span>Browser Web Speech Playground</span>
+                </div>
                 <h3 style={{ margin: '0 0 0.5rem 0', fontSize: '1.25rem', fontWeight: 800, color: 'var(--brand-forest-800)' }}>
                   {t('voice.web_mic_title')}
                 </h3>
@@ -1760,11 +1763,33 @@ export default function HelloFarmerApp() {
               <div className="card-interactive" style={{ padding: '2rem' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem' }}>
                   <div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem', flexWrap: 'wrap' }}>
                       <MapPin size={18} color="var(--brand-forest-700)" />
                       <span style={{ fontWeight: 700, color: 'var(--brand-forest-700)', fontSize: '0.9rem' }}>
-                        {weatherData?.location || t('weather.current_loc')}
+                        {weatherData?.location || selectedLocationName}
                       </span>
+                      {weatherLocations.length > 0 && (
+                        <select
+                          value={selectedLocationName}
+                          onChange={(e) => handleLocationChange(e.target.value)}
+                          style={{
+                            padding: '0.25rem 0.6rem',
+                            borderRadius: 'var(--radius-sm)',
+                            border: '1px solid var(--border-subtle)',
+                            fontSize: '0.8rem',
+                            backgroundColor: '#ffffff',
+                            color: 'var(--text-main)',
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          {weatherLocations.map((loc: any) => (
+                            <option key={loc.name} value={loc.name}>
+                              📍 {loc.name} ({loc.region})
+                            </option>
+                          ))}
+                        </select>
+                      )}
                     </div>
                     <h2 style={{ margin: 0, fontSize: '1.75rem', fontWeight: 800, color: 'var(--brand-forest-800)' }}>
                       {t('weather.title')}
@@ -1775,7 +1800,11 @@ export default function HelloFarmerApp() {
                   </div>
                   <div style={{ textAlign: 'right' }}>
                     <div style={{ fontSize: '2.5rem', fontWeight: 800, color: 'var(--text-main)', lineHeight: 1 }}>
-                      {weatherData?.forecast?.temperature_current_c ? `${weatherData.forecast.temperature_current_c}°C` : '23.5°C'}
+                      {weatherLoading ? (
+                        <span style={{ fontSize: '1.5rem', color: 'var(--text-muted)' }}>Updating...</span>
+                      ) : (
+                        weatherData?.forecast?.temperature_current_c ? `${weatherData.forecast.temperature_current_c}°C` : '23.5°C'
+                      )}
                     </div>
                     <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
                       Max {weatherData?.forecast?.temperature_max_c ?? '27.2'}°C • Min {weatherData?.forecast?.temperature_min_c ?? '14.1'}°C
@@ -2041,7 +2070,7 @@ export default function HelloFarmerApp() {
                   <div style={{ padding: '0.875rem', backgroundColor: 'var(--bg-subtle)', borderRadius: 'var(--radius-md)' }}>
                     <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{t('history.caller_id')}</span>
                     <div style={{ fontWeight: 700, fontSize: '0.9rem', fontFamily: 'monospace' }}>
-                      {farmerProfile?.phone_hash || 'e3b0c442...a98b'}
+                      {farmerProfile?.phone_hash || '03e80af0...8275'}
                     </div>
                   </div>
                   <div style={{ padding: '0.875rem', backgroundColor: 'var(--bg-subtle)', borderRadius: 'var(--radius-md)' }}>
@@ -2057,7 +2086,7 @@ export default function HelloFarmerApp() {
                     </div>
                   </div>
                   <div style={{ padding: '0.875rem', backgroundColor: 'var(--bg-subtle)', borderRadius: 'var(--radius-md)' }}>
-                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>SMS Status</span>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>SMS Notification Status</span>
                     <div style={{ fontWeight: 700, fontSize: '0.9rem', color: farmerProfile?.opted_in !== false ? 'var(--success)' : 'var(--danger)' }}>
                       {farmerProfile?.opted_in !== false ? t('history.opted_in') : t('history.opted_out')}
                     </div>
