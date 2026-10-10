@@ -141,6 +141,7 @@ class OpenMeteoWeatherProvider(BaseWeatherProvider):
         params = {
             "latitude": round(latitude, 4),
             "longitude": round(longitude, 4),
+            "current": "temperature_2m,relative_humidity_2m,wind_speed_10m",
             "daily": (
                 "weathercode,temperature_2m_max,temperature_2m_min,"
                 "precipitation_sum,precipitation_probability_max,windspeed_10m_max"
@@ -155,6 +156,7 @@ class OpenMeteoWeatherProvider(BaseWeatherProvider):
                 resp.raise_for_status()
                 data = resp.json()
 
+            current_raw = data.get("current", {})
             daily_raw = data.get("daily", {})
             dates = daily_raw.get("time", [])
             precip_sums = daily_raw.get("precipitation_sum", [0.0] * days)
@@ -163,6 +165,9 @@ class OpenMeteoWeatherProvider(BaseWeatherProvider):
             temp_mins = daily_raw.get("temperature_2m_min", [12.0] * days)
             winds = daily_raw.get("windspeed_10m_max", [10.0] * days)
             weather_codes = daily_raw.get("weathercode", [0] * days)
+
+            current_temp = float(current_raw.get("temperature_2m", (float(temp_maxes[0] or 20.0) + float(temp_mins[0] or 12.0)) / 2))
+            current_humidity = float(current_raw.get("relative_humidity_2m", 58.0))
 
             daily_list: list[DailyForecast] = []
             total_precip = 0.0
@@ -173,6 +178,8 @@ class OpenMeteoWeatherProvider(BaseWeatherProvider):
                 p_sum = float(precip_sums[i] or 0.0)
                 p_prob = float(precip_probs[i] or 0.0)
                 w_max = float(winds[i] or 0.0)
+                t_max = float(temp_maxes[i] or 20.0)
+                t_min = float(temp_mins[i] or 12.0)
                 heavy = p_sum >= 20.0
                 if heavy:
                     is_heavy = True
@@ -184,10 +191,13 @@ class OpenMeteoWeatherProvider(BaseWeatherProvider):
                 daily_list.append(
                     DailyForecast(
                         date=dates[i],
+                        day_offset=i,
                         precipitation_sum_mm=p_sum,
                         precipitation_probability=p_prob,
-                        max_temperature_c=float(temp_maxes[i] or 20.0),
-                        min_temperature_c=float(temp_mins[i] or 12.0),
+                        max_temperature_c=t_max,
+                        min_temperature_c=t_min,
+                        temperature_max_c=t_max,
+                        temperature_min_c=t_min,
                         wind_speed_max_kmh=w_max,
                         weather_code=int(weather_codes[i] or 0),
                         is_rainy=p_sum > 1.0,
