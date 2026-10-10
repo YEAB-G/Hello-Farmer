@@ -103,7 +103,7 @@ def format_user_prompt(
             lines.append(f"  - {role}: {text}")
 
     # Retrieved Passages & Web Findings
-    lines.append("### RETRIEVED VETTED PASSAGES & LIVE FINDINGS:")
+    lines.append("### LIVE INTERNET SEARCH FINDINGS & AGRONOMIC KNOWLEDGE:")
     if retrieved_passages:
         for idx, p in enumerate(retrieved_passages, 1):
             chunk_id = p.get("chunk_id", f"c_{idx}")
