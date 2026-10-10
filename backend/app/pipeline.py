@@ -451,7 +451,9 @@ async def process_utterance(
         audio_out = await tts.synthesize(safe_answer.answer, language=session.language)
 
     # Record turn in session history
-    
+    session.history.append({"role": "caller", "text": user_text})
+    session.history.append({"role": "assistant", "text": safe_answer.answer})
+
     return Response(
         audio=audio_out,
         text=safe_answer.answer,
