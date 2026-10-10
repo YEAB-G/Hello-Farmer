@@ -223,7 +223,7 @@ class CallStateMachine:
             logger.error(f"Unhandled error in call state machine {self.call_uuid}: {e}")
             await self._play_prompt("error", self.session_state.language)
         finally:
-            # Call finalized
+            await self._finalize_call_record(end_reason)
             await self.conn.hangup()
             await self.db_engine.dispose()
             async with CALL_LOCK:
