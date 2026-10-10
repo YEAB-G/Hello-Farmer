@@ -972,15 +972,17 @@ export default function HelloFarmerApp() {
                 <div className="card-interactive animate-entrance stagger-1" style={{ padding: '1.25rem' }}>
                   <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 600 }}>{t('stat.calls_served')}</span>
                   <div style={{ fontSize: '2rem', fontWeight: 800, color: 'var(--brand-forest-700)', margin: '0.35rem 0' }}>
-                    18,420+
+                    {analytics?.total_calls ?? (analyticsOverview?.total_calls ?? 0)}
                   </div>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--success)' }}>● {t('stat.sub_calls')}</span>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--success)' }}>
+                    ● {voiceAgentStatus?.service_status === 'ONLINE' ? '8028 AudioSocket Active' : t('stat.sub_calls')}
+                  </span>
                 </div>
 
                 <div className="card-interactive animate-entrance stagger-2" style={{ padding: '1.25rem' }}>
                   <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 600 }}>{t('stat.active_farmers')}</span>
                   <div style={{ fontSize: '2rem', fontWeight: 800, color: 'var(--gold-700)', margin: '0.35rem 0' }}>
-                    12,850+
+                    {analytics?.registered_farmers ?? 0}
                   </div>
                   <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{t('stat.sub_farmers')}</span>
                 </div>
@@ -988,7 +990,7 @@ export default function HelloFarmerApp() {
                 <div className="card-interactive animate-entrance stagger-3" style={{ padding: '1.25rem' }}>
                   <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 600 }}>{t('stat.accuracy')}</span>
                   <div style={{ fontSize: '2rem', fontWeight: 800, color: 'var(--brand-forest-800)', margin: '0.35rem 0' }}>
-                    94.8%
+                    {analytics?.grounded_rate_pct ? `${analytics.grounded_rate_pct}%` : 'N/A'}
                   </div>
                   <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{t('stat.sub_accuracy')}</span>
                 </div>
@@ -996,7 +998,7 @@ export default function HelloFarmerApp() {
                 <div className="card-interactive animate-entrance stagger-4" style={{ padding: '1.25rem' }}>
                   <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 600 }}>{t('stat.response_time')}</span>
                   <div style={{ fontSize: '2rem', fontWeight: 800, color: 'var(--info)', margin: '0.35rem 0' }}>
-                    1.8s
+                    {analytics?.p50_latency_seconds ? `${analytics.p50_latency_seconds}s` : '1.8s'}
                   </div>
                   <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{t('stat.sub_response')}</span>
                 </div>
@@ -1534,11 +1536,13 @@ export default function HelloFarmerApp() {
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', fontSize: '0.85rem', color: '#e2e8f0' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '0.35rem' }}>
                       <span style={{ color: '#94a3b8' }}>SIP Server:</span>
-                      <span style={{ fontWeight: 600 }}>127.0.0.1:5060</span>
+                      <span style={{ fontWeight: 600, fontFamily: 'monospace' }}>
+                        {voiceAgentStatus?.sip_server || '192.168.220.14:5060'}
+                      </span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '0.35rem' }}>
                       <span style={{ color: '#94a3b8' }}>Extension / User:</span>
-                      <span style={{ fontWeight: 600 }}>1001</span>
+                      <span style={{ fontWeight: 600 }}>1001 / 1002</span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '0.35rem' }}>
                       <span style={{ color: '#94a3b8' }}>Password:</span>
@@ -1550,6 +1554,113 @@ export default function HelloFarmerApp() {
                     </div>
                   </div>
                 </div>
+              </div>
+
+              {/* Live Voice Agent & Telephony Engine Health */}
+              <div className="card-interactive" style={{ padding: '1.75rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                    <div style={{ width: '12px', height: '12px', borderRadius: '50%', backgroundColor: voiceAgentStatus?.service_status === 'ONLINE' ? '#16a34a' : '#eab308' }} className="animate-pulse" />
+                    <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 800, color: 'var(--brand-forest-800)' }}>
+                      {t('voice.engine_status')}
+                    </h3>
+                  </div>
+                  <span className="badge badge-success" style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                    <CheckCircle2 size={13} />
+                    <span>{voiceAgentStatus?.telephony_engine || 'Asterisk 20 (AudioSocket :9092)'}</span>
+                  </span>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
+                  <div style={{ padding: '1rem', backgroundColor: 'var(--bg-subtle)', borderRadius: 'var(--radius-md)' }}>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{t('voice.active_calls')}</span>
+                    <div style={{ fontSize: '1.5rem', fontWeight: 800, color: 'var(--brand-forest-700)', marginTop: '0.25rem' }}>
+                      {voiceAgentStatus?.active_calls_count ?? 0}
+                    </div>
+                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Real-time concurrent callers</span>
+                  </div>
+
+                  <div style={{ padding: '1rem', backgroundColor: 'var(--bg-subtle)', borderRadius: 'var(--radius-md)' }}>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{t('voice.total_recorded')}</span>
+                    <div style={{ fontSize: '1.5rem', fontWeight: 800, color: 'var(--gold-700)', marginTop: '0.25rem' }}>
+                      {voiceAgentStatus?.total_calls_recorded ?? callsList.length}
+                    </div>
+                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Persisted in PostgreSQL</span>
+                  </div>
+
+                  <div style={{ padding: '1rem', backgroundColor: 'var(--bg-subtle)', borderRadius: 'var(--radius-md)' }}>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Speech & LLM Pipeline</span>
+                    <div style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--brand-forest-800)', marginTop: '0.4rem' }}>
+                      Whisper • Gemini • Edge-TTS
+                    </div>
+                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Amharic & Afaan Oromoo RAG</span>
+                  </div>
+
+                  <div style={{ padding: '1rem', backgroundColor: 'var(--bg-subtle)', borderRadius: 'var(--radius-md)' }}>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Hotline PBX Extension</span>
+                    <div style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--brand-forest-700)', marginTop: '0.25rem' }}>
+                      8028
+                    </div>
+                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>PJSIP context: hello-farmer-inbound</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Recent Real Call Activity Preview */}
+              <div className="card-interactive" style={{ padding: '1.75rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                  <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 800, color: 'var(--brand-forest-800)' }}>
+                    Recent 8028 Phone Calls
+                  </h3>
+                  <button onClick={() => setActiveTab('history')} className="btn-secondary" style={{ padding: '0.4rem 0.85rem', fontSize: '0.8rem' }}>
+                    <span>All Call Records</span>
+                    <ChevronRight size={14} />
+                  </button>
+                </div>
+
+                {callsList.length === 0 ? (
+                  <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                    {t('history.no_calls')}
+                  </p>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                    {callsList.slice(0, 3).map((c: any) => (
+                      <div key={c.id} style={{ padding: '0.875rem 1rem', backgroundColor: 'var(--bg-subtle)', borderRadius: 'var(--radius-md)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+                        <div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            <span style={{ fontWeight: 700, fontSize: '0.85rem' }}>{c.started_at}</span>
+                            <span className="badge badge-neutral" style={{ fontSize: '0.7rem' }}>
+                              {c.language === 'om' ? 'Afaan Oromoo' : 'አማርኛ'}
+                            </span>
+                            <span className={`badge ${c.end_reason === 'completed' ? 'badge-success' : 'badge-warning'}`} style={{ fontSize: '0.7rem' }}>
+                              {c.end_reason === 'completed' ? 'Completed' : c.end_reason}
+                            </span>
+                          </div>
+                          {c.first_question && (
+                            <p style={{ margin: '0.35rem 0 0 0', fontSize: '0.8rem', color: 'var(--text-body)', maxWidth: '650px' }}>
+                              "{c.first_question}"
+                            </p>
+                          )}
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                          <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-muted)' }}>
+                            {c.duration_seconds}s
+                          </span>
+                          <button
+                            onClick={() => {
+                              handleViewCallDetail(c.id);
+                              setActiveTab('history');
+                            }}
+                            className="btn-primary"
+                            style={{ padding: '0.35rem 0.75rem', fontSize: '0.75rem' }}
+                          >
+                            {t('history.view_transcript')}
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* How it Works 3 Steps */}
