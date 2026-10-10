@@ -173,3 +173,12 @@ class AudioSocketServer:
             await self.server.wait_closed()
             logger.info("AudioSocket TCP server stopped.")
 
+    def get_status(self) -> dict:
+        return {
+            "status": "online" if (self.server and self.server.is_serving()) else ("ready" if self.server else "offline"),
+            "active_calls_count": len(self.active_calls),
+            "active_call_ids": list(self.active_calls.keys()),
+            "host": self.host,
+            "port": self.port,
+        }
+
