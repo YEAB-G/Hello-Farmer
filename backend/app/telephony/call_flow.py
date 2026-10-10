@@ -298,7 +298,11 @@ class CallStateMachine:
             or getattr(response.metadata, "answer_en_gloss", None)
             or "Caller utterance"
         )
-        # Dialogue messages queued
+        await self._save_turn_messages(
+            caller_text=caller_txt,
+            assistant_text=response.text,
+            grounded=getattr(response.metadata, "grounded", True),
+        )
 
         # Check for Low Confidence / Empty STT
         if response.metadata.confidence < 0.2 or not response.text.strip():
