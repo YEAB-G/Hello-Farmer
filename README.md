@@ -4,6 +4,8 @@
 
 Hello Farmer enables Ethiopian smallholder and commercial farmers to access grounded, actionable agronomic advice in **Amharic (አማርኛ)**, **Afaan Oromoo**, and **English**.
 
+The platform prioritizes live **web search results** over local **RAG retrieval** when the user asks for time-sensitive agronomic guidance, market conditions, government advisories, pest outbreaks, or newly published field recommendations. The local knowledge base remains a strong fallback for verified Ethiopian agronomic manuals and institutional guidance.
+
 The platform provides dual access modes:
 1. **National Telephone Voice Line (8028)**: Farmers with ordinary mobile phones can dial **8028** toll-free, speak naturally without keypad menus or DTMF presses, and hear spoken advice.
 2. **Modern Web Application (`http://localhost:3000`)**: An agricultural AI platform featuring conversational chat, voice input, agro-meteorological risk forecasts, crop yield prediction, and call history.
@@ -31,9 +33,11 @@ flowchart TD
         VAD --> Resample[Audio Resampling 8kHz to 16kHz]
         Resample --> STT[STT: Groq Whisper-Large-V3 / Gemini]
         STT --> LangDet[Language & Dialect Identification]
-        LangDet --> Retrieval[pgvector Agricultural Knowledge Base]
+        LangDet --> WebSearch[Priority: Live Web Search / Current Info]
+        LangDet --> Retrieval[Fallback: pgvector Agricultural Knowledge Base]
         LangDet --> Weather[Open-Meteo Agro-Weather API]
-        Retrieval --> LLM[LLM Reasoning: Groq Qwen / Gemini 2.5]
+        WebSearch --> LLM[LLM Reasoning: Groq Qwen / Gemini 2.5]
+        Retrieval --> LLM
         Weather --> LLM
         LLM --> Guardrails[Safety & Dosage Guardrails]
         Guardrails --> TTS[TTS: Edge-TTS MekdesNeural / AmehaNeural]
@@ -57,7 +61,7 @@ flowchart TD
 ## 3. Key Web Application Modules
 
 * **Home Dashboard**: Welcoming seasonal greeting, instant "Ask Hello Farmer" query bar, 8028 telephone hotline status, and quick advisory pills.
-* **AI Agricultural Advisor**: Grounded conversational chat with Amharic/Afaan Oromo Unicode font support, suggested farming questions, Knowledge Base verification tags, and source citations.
+* **AI Agricultural Advisor**: Grounded conversational chat with Amharic/Afaan Oromo Unicode font support, suggested farming questions, live web-search prioritization for current agronomic updates, and source citations from either fresh web results or the verified Knowledge Base.
 * **Voice Agent 8028 & Web Mic**: Browser speech recognition alongside MicroSIP softphone connection credentials (1001/1002 on 127.0.0.1:5060).
 * **Weather & Agro-Risk Alerts**: Live Open-Meteo forecasts with chemical spraying risk evaluations, planting soil moisture indices, and rainfall warnings.
 * **Crop Yield Predictor**: EIAR-grounded yield estimator for Teff, Maize, Wheat, Coffee, and Barley with soil type and fertilizer inputs.
