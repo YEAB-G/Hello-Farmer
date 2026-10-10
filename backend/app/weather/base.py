@@ -31,6 +31,10 @@ class WeatherForecast(BaseModel):
     wind_speed_max_kmh: float = 0.0
     is_heavy_rain: bool = False
     summary: str = ""
+    temperature_current_c: float = 22.0
+    temperature_max_c: float = 25.0
+    temperature_min_c: float = 14.0
+    relative_humidity_mean: float = 55.0
     daily: list[DailyForecast] = Field(default_factory=list)
     raw_data: dict[str, Any] = Field(default_factory=dict)
 
