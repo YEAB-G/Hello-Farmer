@@ -9,44 +9,38 @@ import numpy as np
 
 try:
     from app.audio.convert import pcm8k_to_pcm16k
+    from app.audio.preprocess import preprocess_speech_for_stt
     from app.config import settings
     from app.stt.base import BaseSTTProvider, Transcript
+    from app.stt.prompts import get_stt_biasing_prompt
 except ImportError:
     from backend.app.audio.convert import pcm8k_to_pcm16k
+    from backend.app.audio.preprocess import preprocess_speech_for_stt
     from backend.app.config import settings
     from backend.app.stt.base import BaseSTTProvider, Transcript
+    from backend.app.stt.prompts import get_stt_biasing_prompt
 
 logger = logging.getLogger("hello_farmer.stt.groq")
 
 
 class GroqSTTProvider(BaseSTTProvider):
-    """Whisper speech-to-text powered by Groq cloud."""
+    """Whisper speech-to-text powered by Groq cloud with acoustic pre-processing and domain biasing."""
 
     def __init__(self, api_key: str | None = None, model: str = "whisper-large-v3-turbo"):
         self.api_key = api_key or settings.GROQ_API_KEY
         self.model = model
         self.endpoint = "https://api.groq.com/openai/v1/audio/transcriptions"
 
-    def _pcm_to_16k_wav(self, pcm_bytes: bytes) -> bytes:
-        """Convert raw 8kHz mono PCM to normalized 16kHz WAV bytes."""
-        try:
-            samples = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32)
-            max_val = np.max(np.abs(samples)) if len(samples) > 0 else 0
-            if max_val > 100:
-                samples = samples * (24000.0 / max_val)
-            normalized_pcm = np.clip(samples, -32768, 32767).astype(np.int16).tobytes()
-            pcm_16k = pcm8k_to_pcm16k(normalized_pcm)
-        except Exception:
-            pcm_16k = pcm_bytes
-
-        buf = io.BytesIO()
-        with wave.open(buf, "wb") as wf:
-            wf.setnchannels(1)
-            wf.setsampwidth(2)
-            wf.setframerate(16000)
-            wf.writeframes(pcm_16k)
-        buf.seek(0)
-        return buf.read()
+    def _prepare_wav(self, wav_path_or_bytes: str | bytes) -> bytes:
+        """Preprocess audio with AGC, pre-emphasis, and 16kHz WAV packaging."""
+        if isinstance(wav_path_or_bytes, str):
+            with open(wav_path_or_bytes, "rb") as f:
+                raw_bytes = f.read()
+        elif isinstance(wav_path_or_bytes, bytes):
+            raw_bytes = wav_path_or_bytes
+        else:
+            return b""
+        return preprocess_speech_for_stt(raw_bytes, is_8k_pcm=not raw_bytes.startswith(b"RIFF"))
 
     def _is_hallucination(self, text: str) -> bool:
         """Detect repetitive character/token looping common in low-resource Whisper outputs."""
@@ -61,6 +55,10 @@ class GroqSTTProvider(BaseSTTProvider):
             unique_chars = set(clean)
             if len(clean) >= 6 and len(unique_chars) <= 2:
                 return True
+        # Common English Whisper silence hallucinations
+        english_hallucinations = ["thank you for watching", "subtitles by", "amara.org", "you"]
+        if text.strip().lower() in english_hallucinations:
+            return True
         return False
 
     async def transcribe(self, wav_path_or_bytes: str | bytes, language: str = "am") -> Transcript:
@@ -69,15 +67,8 @@ class GroqSTTProvider(BaseSTTProvider):
             logger.warning("GROQ_API_KEY not configured for STT.")
             return Transcript(text="", confidence=0.0, provider="groq_error")
 
-        if isinstance(wav_path_or_bytes, str):
-            with open(wav_path_or_bytes, "rb") as f:
-                wav_bytes = f.read()
-        elif isinstance(wav_path_or_bytes, bytes):
-            if wav_path_or_bytes.startswith(b"RIFF"):
-                wav_bytes = wav_path_or_bytes
-            else:
-                wav_bytes = self._pcm_to_16k_wav(wav_path_or_bytes)
-        else:
+        wav_bytes = self._prepare_wav(wav_path_or_bytes)
+        if not wav_bytes:
             return Transcript(text="", confidence=0.0, provider="groq_empty")
 
         headers = {
@@ -91,10 +82,10 @@ class GroqSTTProvider(BaseSTTProvider):
             "model": self.model,
             "response_format": "json",
             "temperature": 0.0,
+            "prompt": get_stt_biasing_prompt(language),
         }
         if lang_code:
             data["language"] = lang_code
-            data["prompt"] = "የኢትዮጵያ ግብርና፣ በቆሎ፣ ስንዴ፣ ጤፍ፣ ማዳበሪያ፣ በሽታ፣ ዝናብ፣ እርሻ"
 
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
