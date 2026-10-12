@@ -44,7 +44,7 @@ class BaseTTSProvider(ABC):
         if not text or not text.strip():
             return b""
 
-        actual_voice = voice or ("am-ET-AmehaNeural" if language == "am" else "default")
+        actual_voice = voice or ("am-ET-MekdesNeural" if language == "am" else "default")
         cache_path = self.get_cache_path(text.strip(), actual_voice, language)
 
         # Return cached audio if present
