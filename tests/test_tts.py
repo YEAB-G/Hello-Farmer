@@ -65,3 +65,18 @@ async def test_edge_tts_synthesis(tmp_path):
 
     assert sr == 8000
     assert len(data.shape) == 1
+
+
+def test_agricultural_tts_normalization():
+    """Verify agricultural units, markdown, and hotlines are normalized for speech."""
+    from backend.app.tts.normalizer import normalize_text_for_tts
+
+    raw_text = "**የስንዴ ዝገት** ለመከላከል 50kg ማዳበሪያ እና 200ml ፀረ-ተባይ ይጠቀሙ. በ 8028 ይደውሉ."
+    norm = normalize_text_for_tts(raw_text, language="am")
+
+    assert "**" not in norm
+    assert "ኪሎ ግራም" in norm
+    assert "ሚሊ ሊትር" in norm
+    assert "ስምንት ዜሮ ሁለት ስምንት" in norm
+    assert "።" in norm
+
