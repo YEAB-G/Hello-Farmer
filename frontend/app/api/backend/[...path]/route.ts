@@ -14,6 +14,19 @@ export async function GET(request: NextRequest, { params }: { params: { path: st
         'Accept': 'application/json',
       },
     });
+    const contentType = res.headers.get('content-type') || '';
+    if (contentType.includes('audio/')) {
+      const buffer = await res.arrayBuffer();
+      return new NextResponse(buffer, {
+        status: res.status,
+        headers: {
+          'Content-Type': contentType,
+          'Content-Length': buffer.byteLength.toString(),
+          'Cache-Control': 'public, max-age=3600',
+        },
+      });
+    }
+
     const data = await res.json();
     return NextResponse.json(data, { status: res.status });
   } catch (err: any) {
