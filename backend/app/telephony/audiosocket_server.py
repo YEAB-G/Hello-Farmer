@@ -61,20 +61,30 @@ class AudioSocketConnection:
             logger.error(f"Failed to read AudioSocket UUID handshake: {e}")
             self.is_active = False
 
-    def drain_audio_buffer(self):
-        """Drain buffered frames accumulated in TCP reader during outgoing playback."""
+    async def drain_audio_buffer(self):
+        """Thoroughly drain buffered frames accumulated in TCP socket during outgoing playback."""
         drained_count = 0
         try:
-            while len(self.reader._buffer) >= 3:
-                header = self.reader._buffer[:3]
-                msg_type, length = struct.unpack("!BH", header)
-                frame_len = 3 + length
-                if len(self.reader._buffer) < frame_len:
+            # 1. Clear internal StreamReader buffer
+            if hasattr(self.reader, "_buffer") and self.reader._buffer:
+                self.reader._buffer.clear()
+
+            # 2. Non-blocking drain of any packets already received by kernel socket
+            while self.is_active:
+                try:
+                    header = await asyncio.wait_for(self.reader.readexactly(3), timeout=0.015)
+                    msg_type, length = struct.unpack("!BH", header)
+                    if length > 0:
+                        await asyncio.wait_for(self.reader.readexactly(length), timeout=0.015)
+                    drained_count += 1
+                except asyncio.TimeoutError:
                     break
-                del self.reader._buffer[:frame_len]
-                drained_count += 1
+                except (asyncio.IncompleteReadError, ConnectionResetError):
+                    self.is_active = False
+                    break
+
             if drained_count > 0:
-                print(f"🧹 [BUFFER DRAIN] Cleared {drained_count} buffered frames from playback. Listening to caller in real time!", flush=True)
+                print(f"🧹 [BUFFER DRAIN] Cleared {drained_count} stale frames from playback. Listening to caller in real time!", flush=True)
         except Exception as e:
             logger.warning(f"Error draining audio buffer: {e}")
 
