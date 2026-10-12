@@ -36,6 +36,11 @@ PROMPTS_SPEC = {
         "voice": "am-ET-MekdesNeural",
         "text": "ይቅርታ፣ ድምጽዎ በደንብ አልተሰማም። እባክዎ ጥያቄዎን በድጋሚ ይናገሩ።",
     },
+    "repeat_prompt_am.wav": {
+        "lang": "am",
+        "voice": "am-ET-MekdesNeural",
+        "text": "ይቅርታ፣ ድምጽዎ በደንብ አልተሰማም። እባክዎ ጥያቄዎን በድጋሚ ይናገሩ።",
+    },
     "safe_fallback_am.wav": {
         "lang": "am",
         "voice": "am-ET-MekdesNeural",
@@ -51,46 +56,51 @@ PROMPTS_SPEC = {
         "voice": "am-ET-MekdesNeural",
         "text": "ይቅርታ፣ የስርዓት መቆራረጥ አጋጥሟል። እባክዎ የአካባቢዎን የግብርና ባለሙያ ያማክሩ።",
     },
-    # Afaan Oromo Prompts
+    # Afaan Oromo Prompts (Unified with Mekdes for consistent female persona)
     "greeting_om.wav": {
         "lang": "om",
-        "voice": "am-ET-AmehaNeural",
+        "voice": "am-ET-MekdesNeural",
         "text": "Baga gara gargaaraa qonnaa Heelo Faarmar nagaan dhuftan. Gaaffii keessan kallattiin dubbachuu dandeessu.",
     },
     "consent_om.wav": {
         "lang": "om",
-        "voice": "am-ET-AmehaNeural",
+        "voice": "am-ET-MekdesNeural",
         "text": "Tajaajilli kun akka fooyya'uuf gaaffiin keessan akka galmaa'u ni eeyyamtuu?",
     },
     "one_moment_om.wav": {
         "lang": "om",
-        "voice": "am-ET-AmehaNeural",
+        "voice": "am-ET-MekdesNeural",
         "text": "Mee xiqqoo eegaa...",
     },
     "low_confidence_om.wav": {
         "lang": "om",
-        "voice": "am-ET-AmehaNeural",
+        "voice": "am-ET-MekdesNeural",
+        "text": "Dhiifama, sagaleen keessan sirriitti hin dhagahamne. Maaloo irra deebi'aa dubbadhaa.",
+    },
+    "repeat_prompt_om.wav": {
+        "lang": "om",
+        "voice": "am-ET-MekdesNeural",
         "text": "Dhiifama, sagaleen keessan sirriitti hin dhagahamne. Maaloo irra deebi'aa dubbadhaa.",
     },
     "safe_fallback_om.wav": {
         "lang": "om",
-        "voice": "am-ET-AmehaNeural",
+        "voice": "am-ET-MekdesNeural",
         "text": "Dhiifama, gaaffii kanaaf ragaan amansiisaan gahaan hin jiru. Maaloo ogeessa misooma qonnaa naannoo keessanii gaafadhaa yookiin bilbila saddeet-duwwaa-lama-saddeet irratti bilbilaa.",
     },
     "goodbye_om.wav": {
         "lang": "om",
-        "voice": "am-ET-AmehaNeural",
+        "voice": "am-ET-MekdesNeural",
         "text": "Waan bilbiltaniif galatoomaa. Nagaatti.",
     },
     "error_om.wav": {
         "lang": "om",
-        "voice": "am-ET-AmehaNeural",
+        "voice": "am-ET-MekdesNeural",
         "text": "Dhiifama, rakkoon teeknikaa mudateera. Maaloo ogeessa qonnaa naannoo keessanii gaafadhaa.",
     },
-    # Bilingual Initial Greeting
+    # Bilingual Initial Greeting (Unified with Mekdes)
     "greeting_bilingual.wav": {
         "lang": "am",
-        "voice": "am-ET-AmehaNeural",
+        "voice": "am-ET-MekdesNeural",
         "text": "እንኳን ወደ ሄሎ ፋርመር በደህና መጡ። Baga gara Heelo Faarmar nagaan dhuftan.",
     },
 }
