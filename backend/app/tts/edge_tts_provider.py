@@ -12,15 +12,17 @@ import edge_tts
 try:
     from app.audio.convert import audio_stream_to_pcm8k
     from app.tts.base import BaseTTSProvider
+    from app.tts.normalizer import normalize_text_for_tts
 except ImportError:
     from backend.app.audio.convert import audio_stream_to_pcm8k
     from backend.app.tts.base import BaseTTSProvider
+    from backend.app.tts.normalizer import normalize_text_for_tts
 
 logger = logging.getLogger("hello_farmer.tts.edge")
 
 
 class EdgeTTSProvider(BaseTTSProvider):
-    """Edge-TTS provider. Mark: PROTOTYPE ONLY."""
+    """Edge-TTS provider with agricultural prosody and normalization enhancements."""
 
     DEFAULT_AMHARIC_VOICE = "am-ET-MekdesNeural"
     DEFAULT_OROMO_VOICE = "am-ET-MekdesNeural"  # Fallback: edge-tts lacks native om-ET voice
@@ -75,14 +77,18 @@ class EdgeTTSProvider(BaseTTSProvider):
         return b""
 
     async def _synthesize_raw(self, text: str, voice: str | None = None, language: str = "am") -> bytes:
-        """Synthesize text via edge-tts, falling back to Google TTS and offline acoustic synthesis."""
+        """Synthesize text via edge-tts with prosody tuning, falling back to Google TTS."""
         selected_voice = (
             voice if (voice and voice != "default")
             else (self.DEFAULT_AMHARIC_VOICE if language == "am" else self.DEFAULT_OROMO_VOICE)
         )
 
+        # 1. Phonetically normalize agricultural dosages, units, and punctuation
+        norm_text = normalize_text_for_tts(text, language=language) or text
+
+        # 2. Try Edge-TTS with calibrated rural prosody (-8% rate for clarity, +15% volume)
         try:
-            communicate = edge_tts.Communicate(text, selected_voice, rate="-4%")
+            communicate = edge_tts.Communicate(norm_text, selected_voice, rate="-8%", volume="+15%")
             mp3_buffer = io.BytesIO()
             async for chunk in communicate.stream():
                 if chunk["type"] == "audio":
@@ -96,8 +102,8 @@ class EdgeTTSProvider(BaseTTSProvider):
         except Exception as e:
             logger.warning(f"Edge-TTS synthesis unavailable ({e}), trying Google TTS fallback...")
 
-        # Tier 2: Resilient Google Translate TTS
-        google_pcm = await self._synthesize_google(text, language=language)
+        # Tier 2: Resilient Google Translate TTS with normalized text
+        google_pcm = await self._synthesize_google(norm_text, language=language)
         if google_pcm and len(google_pcm) > 0:
             return google_pcm
 
