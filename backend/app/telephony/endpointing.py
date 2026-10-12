@@ -51,6 +51,7 @@ class VADEndpointer:
         self.speech_frames: list[bytes] = []
         self.pre_roll.clear()
         self.start_time: float = time.monotonic()
+        self.silence_start_time: Optional[float] = None
         self.voiced_ms: int = 0
         self.silence_ms: int = 0
         self.total_audio_ms: int = 0
@@ -80,15 +81,13 @@ class VADEndpointer:
                 self.has_voiced = True
                 self.voiced_ms = self.FRAME_MS
                 self.silence_ms = 0
+                self.silence_start_time = None
                 # Prepend pre-roll frames so onset consonants (e.g. 'p', 't', 'k') are preserved
                 self.speech_frames.extend(list(self.pre_roll))
                 self.speech_frames.append(frame_bytes)
             else:
-                self.pre_roll.append(frame_bytes)
-                # Check initial silence timeout (both wall-clock and audio stream)
-                if (now - self.start_time >= self.initial_silence_timeout_sec) or (
-                    self.total_audio_ms >= int(self.initial_silence_timeout_sec * 1000)
-                ):
+                # Check initial silence timeout (strictly wall-clock elapsed time so buffered frames never trigger premature timeout)
+                if now - self.start_time >= self.initial_silence_timeout_sec:
                     self.state = EndpointState.INITIAL_SILENCE_TIMEOUT
                     return self.state
 
@@ -103,11 +102,16 @@ class VADEndpointer:
             if is_voiced:
                 self.voiced_ms += self.FRAME_MS
                 self.silence_ms = 0
+                self.silence_start_time = None
             else:
+                if self.silence_start_time is None:
+                    self.silence_start_time = now
                 self.silence_ms += self.FRAME_MS
+                elapsed_silence_ms = int((now - self.silence_start_time) * 1000)
+                effective_silence_ms = max(self.silence_ms, elapsed_silence_ms)
                 # If caller was speaking and is now silent for silence_timeout_ms (e.g. 800ms)
                 if (
-                    self.silence_ms >= self.silence_timeout_ms
+                    effective_silence_ms >= self.silence_timeout_ms
                     and self.voiced_ms >= self.min_speech_ms
                 ):
                     self.state = EndpointState.SPEECH_ENDED
