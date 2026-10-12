@@ -65,7 +65,7 @@ def audio_stream_to_pcm8k(audio_bytes: bytes) -> bytes:
                 "-hide_banner",
                 "-loglevel", "error",
                 "-i", "pipe:0",
-                "-af", "volume=1.5,lowpass=f=3800",
+                "-af", "volume=1.5,highpass=f=180,lowpass=f=3800",
                 "-f", "s16le",
                 "-acodec", "pcm_s16le",
                 "-ac", "1",
@@ -97,7 +97,67 @@ def audio_stream_to_pcm8k(audio_bytes: bytes) -> bytes:
 
 def pcm8k_to_wav(pcm_data: bytes) -> bytes:
     """Wrap raw 8 kHz 16-bit mono linear PCM bytes into standard WAV container."""
+    if not pcm_data:
+        return b""
     samples = np.frombuffer(pcm_data, dtype=np.int16)
     buf = io.BytesIO()
     sf.write(buf, samples, 8000, format="WAV", subtype="PCM_16")
     return buf.getvalue()
+
+
+def pcm8k_to_wav_base64(pcm_data: bytes) -> str:
+    """Wrap raw 8 kHz PCM into a standard WAV container and return as base64 data URI."""
+    wav_bytes = pcm8k_to_wav(pcm_data)
+    if not wav_bytes:
+        return ""
+    import base64
+    b64 = base64.b64encode(wav_bytes).decode("ascii")
+    return f"data:audio/wav;base64,{b64}"
+
+
+def browser_audio_to_wav16k(audio_bytes: bytes) -> bytes:
+    """Transcode browser audio (WebM, OGG, MP4, AAC, or arbitrary WAV) to 16 kHz mono WAV bytes.
+    
+    This ensures clean input for STT providers (Gemini Multimodal audio and Groq Whisper).
+    """
+    if not audio_bytes:
+        return b""
+
+    # Try ffmpeg transcoding first
+    try:
+        proc = subprocess.run(
+            [
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel", "error",
+                "-i", "pipe:0",
+                "-af", "volume=1.2,highpass=f=80,lowpass=f=7500",
+                "-f", "wav",
+                "-acodec", "pcm_s16le",
+                "-ac", "1",
+                "-ar", "16000",
+                "pipe:1"
+            ],
+            input=audio_bytes,
+            capture_output=True,
+            check=True
+        )
+        if proc.stdout and proc.stdout.startswith(b"RIFF"):
+            return proc.stdout
+    except Exception:
+        pass
+
+    # Fallback using soundfile / scipy
+    try:
+        data, sr = sf.read(io.BytesIO(audio_bytes), dtype="int16")
+        if len(data.shape) > 1:
+            data = data.mean(axis=1).astype(np.int16)
+        if sr != 16000:
+            num_target_samples = int(len(data) * 16000 / sr)
+            data = scipy.signal.resample(data, num_target_samples).astype(np.int16)
+        buf = io.BytesIO()
+        sf.write(buf, data, 16000, format="WAV", subtype="PCM_16")
+        return buf.getvalue()
+    except Exception:
+        return b""
+
