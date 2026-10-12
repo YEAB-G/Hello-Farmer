@@ -1,19 +1,25 @@
 """Main FastAPI application for Hello Farmer backend."""
 import asyncio
+import base64
+import hashlib
 import logging
+import time
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Response as FastAPIResponse
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import desc, func, select
 from sqlalchemy.orm import selectinload
 
+from app.audio.convert import browser_audio_to_wav16k, pcm8k_to_wav, pcm8k_to_wav_base64
 from app.config import settings
 from app.database.models import Call, ConversationMessage, Farmer, FarmerContext, SmsMessage, Warning
 from app.database.session import async_session_factory
 from app.pipeline import SessionState, process_utterance
+from app.stt import get_stt_provider
 from app.telephony.audiosocket_server import AudioSocketServer
+from app.tts import get_tts_provider
 
 logging.basicConfig(
     level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO),
@@ -79,27 +85,66 @@ async def api_health():
     }
 
 
+# In-memory web conversational sessions store (retains multi-turn context per session)
+web_sessions: dict[str, SessionState] = {}
+audio_cache_store: dict[str, bytes] = {}
+
+
+def get_or_create_web_session(session_id: str | None, language: str, caller_hash: str = "web-anonymous") -> SessionState:
+    sid = session_id or f"web-session-{int(time.time()*1000)}"
+    if sid in web_sessions:
+        sess = web_sessions[sid]
+        sess.language = language
+        return sess
+    sess = SessionState(
+        session_id=sid,
+        caller_hash=caller_hash,
+        language=language,
+        has_consented=True,
+    )
+    if len(web_sessions) > 500:
+        for k in list(web_sessions.keys())[:100]:
+            web_sessions.pop(k, None)
+    web_sessions[sid] = sess
+    return sess
+
+
+def decode_audio_payload(audio_b64: str) -> bytes:
+    """Safely decode base64 audio payload handling optional data URI prefixes."""
+    clean_b64 = audio_b64.strip()
+    if "," in clean_b64:
+        clean_b64 = clean_b64.split(",", 1)[1]
+    return base64.b64decode(clean_b64)
+
+
 class AskRequest(BaseModel):
     question: str
     language: str = "am"
     caller_hash: str | None = "web-anonymous"
+    session_id: str | None = None
+    synthesize_audio: bool = False
 
 
 @app.post("/api/v1/ask")
 async def ask_endpoint(payload: AskRequest):
     """Text-based Ask Hello Farmer endpoint (shares the exact same core pipeline)."""
-    session = SessionState(
-        session_id="web-session-1",
-        caller_hash=payload.caller_hash or "web-anonymous",
-        language=payload.language,
-        has_consented=True,
-    )
+    session = get_or_create_web_session(payload.session_id, payload.language, payload.caller_hash or "web-anonymous")
 
     response = await process_utterance(
         audio_bytes=None,
         session=session,
         text_override=payload.question,
+        synthesize_audio=payload.synthesize_audio,
     )
+
+    audio_base64 = ""
+    audio_url = ""
+    if payload.synthesize_audio and response.audio:
+        wav_bytes = pcm8k_to_wav(response.audio)
+        audio_id = hashlib.sha256(f"{session.language}:{response.text}".encode()).hexdigest()[:16]
+        audio_cache_store[audio_id] = wav_bytes
+        audio_base64 = pcm8k_to_wav_base64(response.audio)
+        audio_url = f"/api/v1/voice/audio/{audio_id}"
 
     return {
         "answer": response.text,
@@ -108,7 +153,160 @@ async def ask_endpoint(payload: AskRequest):
         "needs_referral": response.metadata.needs_referral,
         "sources_used": response.metadata.sources_used,
         "confidence": response.metadata.confidence,
+        "session_id": session.session_id,
+        "audio_base64": audio_base64,
+        "audio_url": audio_url,
     }
+
+
+class TranscribeRequest(BaseModel):
+    audio_base64: str
+    language: str = "am"
+
+
+@app.post("/api/v1/voice/transcribe")
+async def transcribe_endpoint(payload: TranscribeRequest):
+    """Transcribe browser microphone audio using SOTA Gemini/Whisper STT."""
+    if not payload.audio_base64 or not payload.audio_base64.strip():
+        raise HTTPException(status_code=400, detail="Empty audio payload")
+
+    try:
+        raw_audio = decode_audio_payload(payload.audio_base64)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid base64 audio: {e}")
+
+    wav16k = browser_audio_to_wav16k(raw_audio)
+    if not wav16k:
+        raise HTTPException(status_code=400, detail="Could not decode audio container")
+
+    stt = get_stt_provider()
+    transcript = await stt.transcribe(wav16k, language=payload.language)
+
+    return {
+        "transcript": transcript.text,
+        "confidence": transcript.confidence,
+        "provider": transcript.provider,
+        "latency_ms": transcript.latency_ms,
+        "language": transcript.language,
+    }
+
+
+class SynthesizeRequest(BaseModel):
+    text: str
+    language: str = "am"
+
+
+@app.post("/api/v1/voice/synthesize")
+@app.post("/api/v1/voice/tts")
+async def synthesize_endpoint(payload: SynthesizeRequest):
+    """Synthesize text into natural spoken speech using Edge-TTS with Google fallback."""
+    clean_text = payload.text.strip()
+    if not clean_text:
+        return {"audio_base64": "", "audio_url": "", "language": payload.language, "text": ""}
+
+    tts = get_tts_provider()
+    pcm_bytes = await tts.synthesize(clean_text, language=payload.language)
+    if not pcm_bytes:
+        raise HTTPException(status_code=500, detail="Speech synthesis failed")
+
+    wav_bytes = pcm8k_to_wav(pcm_bytes)
+    audio_id = hashlib.sha256(f"{payload.language}:{clean_text}".encode()).hexdigest()[:16]
+    audio_cache_store[audio_id] = wav_bytes
+    audio_base64 = pcm8k_to_wav_base64(pcm_bytes)
+
+    return {
+        "audio_base64": audio_base64,
+        "audio_url": f"/api/v1/voice/audio/{audio_id}",
+        "mime_type": "audio/wav",
+        "language": payload.language,
+        "text": clean_text,
+    }
+
+
+class VoiceAskRequest(BaseModel):
+    audio_base64: str | None = None
+    question: str | None = None
+    language: str = "am"
+    session_id: str | None = None
+    synthesize_audio: bool = True
+
+
+@app.post("/api/v1/voice/ask")
+async def voice_ask_endpoint(payload: VoiceAskRequest):
+    """End-to-end voice chat: audio input -> STT -> RAG reasoning -> text & voice output."""
+    user_text = ""
+    stt_latency = 0.0
+
+    # Step 1: If browser audio is supplied, transcribe first
+    if payload.audio_base64 and payload.audio_base64.strip():
+        try:
+            raw_audio = decode_audio_payload(payload.audio_base64)
+            wav16k = browser_audio_to_wav16k(raw_audio)
+            if wav16k:
+                stt = get_stt_provider()
+                transcript = await stt.transcribe(wav16k, language=payload.language)
+                user_text = transcript.text.strip()
+                stt_latency = transcript.latency_ms
+        except Exception as e:
+            logger.error(f"Voice chat transcription error: {e}")
+
+    # If user passed or edited question text directly, use that
+    if payload.question and payload.question.strip():
+        user_text = payload.question.strip()
+
+    session = get_or_create_web_session(payload.session_id, payload.language)
+
+    # Step 2: Run agricultural RAG pipeline
+    response = await process_utterance(
+        audio_bytes=None,
+        session=session,
+        text_override=user_text,
+        synthesize_audio=payload.synthesize_audio,
+    )
+
+    audio_base64 = ""
+    audio_url = ""
+    if payload.synthesize_audio and response.audio:
+        wav_bytes = pcm8k_to_wav(response.audio)
+        audio_id = hashlib.sha256(f"{session.language}:{response.text}".encode()).hexdigest()[:16]
+        audio_cache_store[audio_id] = wav_bytes
+        audio_base64 = pcm8k_to_wav_base64(response.audio)
+        audio_url = f"/api/v1/voice/audio/{audio_id}"
+
+    latencies = dict(response.metadata.latency_ms)
+    if stt_latency > 0:
+        latencies["stt"] = stt_latency
+
+    return {
+        "transcript": user_text,
+        "answer": response.text,
+        "answer_en_gloss": response.metadata.answer_en_gloss,
+        "grounded": response.metadata.grounded,
+        "confidence": response.metadata.confidence,
+        "sources_used": response.metadata.sources_used,
+        "topic": response.metadata.topic,
+        "session_id": session.session_id,
+        "audio_base64": audio_base64,
+        "audio_url": audio_url,
+        "language": session.language,
+        "latencies": latencies,
+    }
+
+
+@app.get("/api/v1/voice/audio/{audio_id}")
+async def get_voice_audio(audio_id: str):
+    """Stream cached WAV audio for browser playback."""
+    wav_bytes = audio_cache_store.get(audio_id)
+    if not wav_bytes:
+        raise HTTPException(status_code=404, detail="Audio resource not found or expired")
+    return FastAPIResponse(
+        content=wav_bytes,
+        media_type="audio/wav",
+        headers={
+            "Cache-Control": "public, max-age=3600",
+            "Content-Length": str(len(wav_bytes)),
+        },
+    )
 
 
 @app.get("/api/v1/warnings/active")
