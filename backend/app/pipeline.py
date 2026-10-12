@@ -18,6 +18,7 @@ from app.farmer_context.extraction import (
 from app.language.detect import detect_text_language
 from app.llm.base import LLMAnswer
 from app.llm.chain import LLMFallbackChain
+from app.rag.faq_cache import match_agricultural_faq
 from app.rag.retrieve import retrieve_passages
 from app.rag.store import persist_web_passages_to_rag
 from app.rag.web_search import search_agricultural_web
@@ -29,6 +30,32 @@ from app.weather.provider import get_weather_provider
 from app.weather.risk import WeatherRiskAnalyzer
 
 logger = logging.getLogger("hello_farmer.pipeline")
+
+
+def reformulate_search_query(user_text: str, session: "SessionState") -> str:
+    """Reformulate conversational follow-ups into complete standalone agricultural queries."""
+    text_clean = user_text.strip()
+    words = text_clean.split()
+
+    is_followup = (
+        len(words) <= 5
+        or any(w in text_clean for w in [
+            "መድሃኒቱ", "መጠኑ", "እንዴት", "በስንት", "ከዛ", "በኋላ", "መቼ",
+            "it", "dosage", "cure", "treat", "interval", "spray", "apply"
+        ])
+    )
+
+    context_tokens = []
+    if session.extracted_crop and session.extracted_crop not in text_clean:
+        context_tokens.append(session.extracted_crop)
+    if session.extracted_symptoms and session.extracted_symptoms not in text_clean:
+        context_tokens.append(session.extracted_symptoms)
+
+    if is_followup and context_tokens:
+        enriched_query = f"{' '.join(context_tokens)} {text_clean}"
+        logger.info(f"🔍 [QUERY REFORMULATION] '{text_clean}' -> '{enriched_query}'")
+        return enriched_query
+    return text_clean
 
 WEATHER_INTENT_KEYWORDS = {
     "am": ["ዝናብ", "የአየር ሁኔታ", "መርጨት", "ንፋስ", "ፀሐይ", "ውርጭ", "በረዶ", "ደመና"],
@@ -192,6 +219,7 @@ async def process_utterance(
                 confidence=1.0,
                 latency_ms={"total": round((time.time() - t0) * 1000, 1)},
                 answer_en_gloss="Thank you for calling! Wishing you a great farming season. Goodbye.",
+                user_transcript=user_text,
             ),
         )
 
@@ -216,6 +244,7 @@ async def process_utterance(
                 confidence=1.0,
                 latency_ms={"total": round((time.time() - t0) * 1000, 1)},
                 answer_en_gloss="Hello! I am Hello Farmer agricultural assistant. How can I assist you with your farming or crops today?",
+                user_transcript=user_text,
             ),
         )
 
@@ -321,17 +350,50 @@ async def process_utterance(
                 ],
                 confidence=0.95,
                 latency_ms=latencies,
+                user_transcript=user_text,
+            ),
+        )
+
+    # 3b. Check Semantic FAQ Cache for Instant Verified Solutions (<50ms)
+    faq_match = match_agricultural_faq(user_text, language=session.language)
+    if faq_match:
+        latencies["total"] = round((time.time() - t0) * 1000, 1)
+        audio_out = b""
+        if synthesize_audio:
+            tts = get_tts_provider()
+            audio_out = await tts.synthesize(faq_match.answer, language=session.language)
+
+        session.history.append({"role": "caller", "text": user_text})
+        session.history.append({"role": "assistant", "text": faq_match.answer})
+
+        return Response(
+            audio=audio_out,
+            text=faq_match.answer,
+            metadata=ResponseMetadata(
+                grounded=True,
+                topic=faq_match.topic,
+                needs_referral=False,
+                confidence=faq_match.confidence,
+                sources_used=[
+                    {"title": f"[VERIFIED FAQ] {faq_match.source_title}", "tier": 1, "score": 1.0}
+                ],
+                latency_ms=latencies,
+                answer_en_gloss=faq_match.english_gloss,
+                user_transcript=user_text,
             ),
         )
 
     # 4. Agricultural Agronomy RAG & Live Web Search Flow (LIVE WEB SEARCH PRIORITIZED)
     rag_t0 = time.time()
 
+    # Reformulate query for contextual multi-turn follow-ups
+    search_query = reformulate_search_query(user_text, session)
+
     # Priority 1: Execute Live Web Search for real-time agricultural advisories
     web_passages = []
     try:
         web_passages = await search_agricultural_web(
-            user_text=user_text,
+            user_text=search_query,
             crop=session.extracted_crop,
             language=session.language,
             max_passages=4,
@@ -353,7 +415,7 @@ async def process_utterance(
     try:
         async with async_session_factory() as db_session:
             retrieved_passages_list = await retrieve_passages(
-                query=user_text,
+                query=search_query,
                 session=db_session,
                 top_k=3,
                 crop_filter=session.extracted_crop,
@@ -417,6 +479,23 @@ async def process_utterance(
             }
         ]
 
+    # Live Weather check for spraying or field actions if location known
+    weather_summary = None
+    if session.extracted_location and any(k in user_text for k in ["መርጨት", "መድሃኒት", "መድኃኒት", "አረም", "ዘር", "biif", "spray", "plant"]):
+        try:
+            loc_match = resolve_location(session.extracted_location)
+            if loc_match:
+                wp = get_weather_provider()
+                fc = await wp.get_forecast(latitude=loc_match.latitude, longitude=loc_match.longitude, days=1)
+                spray_eval = WeatherRiskAnalyzer.evaluate_spraying(fc)
+                weather_summary = {
+                    "location": loc_match.name,
+                    "spraying_advisory": spray_eval.reason_om if session.language == "om" else spray_eval.reason_am,
+                    "can_spray": spray_eval.can_spray,
+                }
+        except Exception:
+            pass
+
     # 5. LLM Answer Generation
     llm_t0 = time.time()
     chain = LLMFallbackChain()
@@ -432,6 +511,7 @@ async def process_utterance(
         retrieved_passages=retrieved_dicts,
         conversation_history=session.history,
         farmer_context=farmer_ctx,
+        weather_info=weather_summary,
         language=session.language,
     )
     latencies["llm"] = round((time.time() - llm_t0) * 1000, 1)
