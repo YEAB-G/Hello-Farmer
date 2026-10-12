@@ -39,8 +39,19 @@ import {
   PieChart,
   Calendar,
   Filter,
+  Play,
+  Pause,
+  RotateCcw,
+  Square,
+  Upload,
 } from 'lucide-react';
 import { getTranslation, LANGUAGE_OPTIONS, SupportedLanguage } from './i18n/translations';
+import {
+  getMicrophoneStream,
+  startVoiceRecordingSession,
+  resolveVoiceErrorMessage,
+  VoiceRecorderSession,
+} from './utils/audioRecorder';
 
 type TabType = 'home' | 'assistant' | 'voice' | 'weather' | 'yield' | 'history' | 'analytics';
 
@@ -53,6 +64,9 @@ interface ChatMessage {
   grounded?: boolean;
   confidence?: number;
   sources_used?: any[];
+  audio_base64?: string;
+  audio_url?: string;
+  isVoiceTurn?: boolean;
   timestamp: string;
 }
 
@@ -86,11 +100,25 @@ export default function HelloFarmerApp() {
   const [chatLoading, setChatLoading] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const [sessionId, setSessionId] = useState<string>('');
+  const [autoPlayVoice, setAutoPlayVoice] = useState<boolean>(true);
 
   // Browser Voice State
-  const [isRecording, setIsRecording] = useState(false);
-  const [browserVoiceStatus, setBrowserVoiceStatus] = useState<'idle' | 'listening' | 'processing' | 'speaking'>('idle');
-  const [voiceTranscript, setVoiceTranscript] = useState('');
+  const [recordingState, setRecordingState] = useState<'idle' | 'recording' | 'transcribing' | 'error'>('idle');
+  const [recordingDuration, setRecordingDuration] = useState<number>(0);
+  const [micErrorMessage, setMicErrorMessage] = useState<string | null>(null);
+  const [pendingTranscript, setPendingTranscript] = useState<string | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const voiceRecorderSessionRef = useRef<VoiceRecorderSession | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const recordingTimerRef = useRef<any>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const audioFileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Audio Playback state
+  const activeAudioRef = useRef<HTMLAudioElement | null>(null);
+  const [playingMessageId, setPlayingMessageId] = useState<string | null>(null);
+  const [audioPlaybackStatus, setAudioPlaybackStatus] = useState<'idle' | 'loading' | 'playing' | 'paused'>('idle');
 
   // Dynamic Data States
   const [weatherData, setWeatherData] = useState<any>(null);
@@ -129,9 +157,6 @@ export default function HelloFarmerApp() {
   });
   const [yieldResult, setYieldResult] = useState<any>(null);
   const [yieldLoading, setYieldLoading] = useState(false);
-
-  // Audio Speech state
-  const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
 
   // Auto-scroll chat
   useEffect(() => {
@@ -246,34 +271,289 @@ export default function HelloFarmerApp() {
       .finally(() => setCallDetailLoading(false));
   };
 
-  // Handle Asking Question
+  // Audio playback stop utility
+  const stopCurrentAudio = () => {
+    if (activeAudioRef.current) {
+      activeAudioRef.current.pause();
+      activeAudioRef.current = null;
+    }
+    setPlayingMessageId(null);
+    setAudioPlaybackStatus('idle');
+  };
+
+  // Play assistant voice response using real backend synthesized audio
+  const playMessageAudio = async (msg: ChatMessage) => {
+    if (playingMessageId === msg.id && audioPlaybackStatus === 'playing') {
+      if (activeAudioRef.current) {
+        activeAudioRef.current.pause();
+        setAudioPlaybackStatus('paused');
+      }
+      return;
+    }
+
+    if (playingMessageId === msg.id && audioPlaybackStatus === 'paused') {
+      if (activeAudioRef.current) {
+        activeAudioRef.current.play();
+        setAudioPlaybackStatus('playing');
+      }
+      return;
+    }
+
+    stopCurrentAudio();
+    setPlayingMessageId(msg.id);
+    setAudioPlaybackStatus('loading');
+
+    try {
+      let audioSrc = msg.audio_base64 || (msg.audio_url ? `/api/backend${msg.audio_url.replace('/api/v1', '')}` : '');
+
+      if (!audioSrc) {
+        const res = await fetch('/api/backend/voice/synthesize', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: msg.text, language: msg.language || language }),
+        });
+        const data = await res.json();
+        audioSrc = data.audio_base64 || '';
+        if (audioSrc) {
+          setMessages((prev) =>
+            prev.map((m) => (m.id === msg.id ? { ...m, audio_base64: audioSrc } : m))
+          );
+        }
+      }
+
+      if (!audioSrc) {
+        stopCurrentAudio();
+        return;
+      }
+
+      const audio = new Audio(audioSrc);
+      activeAudioRef.current = audio;
+
+      audio.onended = () => {
+        stopCurrentAudio();
+      };
+      audio.onerror = () => {
+        stopCurrentAudio();
+      };
+
+      await audio.play();
+      setAudioPlaybackStatus('playing');
+    } catch {
+      stopCurrentAudio();
+    }
+  };
+
+  const pauseMessageAudio = () => {
+    if (activeAudioRef.current) {
+      activeAudioRef.current.pause();
+      setAudioPlaybackStatus('paused');
+    }
+  };
+
+  const resumeMessageAudio = () => {
+    if (activeAudioRef.current) {
+      activeAudioRef.current.play();
+      setAudioPlaybackStatus('playing');
+    }
+  };
+
+  const replayMessageAudio = (msg: ChatMessage) => {
+    stopCurrentAudio();
+    setTimeout(() => {
+      playMessageAudio(msg);
+    }, 50);
+  };
+
+  // Browser Microphone Recording (Resilient capture with MediaRecorder & AudioContext fallback)
+  const startVoiceRecording = async () => {
+    if (chatLoading || recordingState === 'transcribing') return;
+    setMicErrorMessage(null);
+    setPendingTranscript(null);
+
+    try {
+      const stream = await getMicrophoneStream();
+      mediaStreamRef.current = stream;
+
+      const session = startVoiceRecordingSession(stream);
+      voiceRecorderSessionRef.current = session;
+
+      setRecordingState('recording');
+      setRecordingDuration(0);
+      if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingDuration((prev) => prev + 1);
+      }, 1000);
+    } catch (err: any) {
+      setMicErrorMessage(resolveVoiceErrorMessage(err, t));
+      setRecordingState('error');
+    }
+  };
+
+  const stopVoiceRecording = async () => {
+    if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+    const session = voiceRecorderSessionRef.current;
+    if (!session) {
+      setRecordingState('idle');
+      return;
+    }
+    voiceRecorderSessionRef.current = null;
+    mediaStreamRef.current = null;
+
+    try {
+      setRecordingState('transcribing');
+      const audioBlob = await session.stop();
+
+      if (!audioBlob || audioBlob.size < 400) {
+        setMicErrorMessage(t('advisor.voice_no_speech'));
+        setRecordingState('idle');
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onloadend = async () => {
+        const base64Audio = reader.result as string;
+        try {
+          const res = await fetch('/api/backend/voice/transcribe', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ audio_base64: base64Audio, language }),
+          });
+          const data = await res.json();
+          if (data.transcript && data.transcript.trim()) {
+            setPendingTranscript(data.transcript.trim());
+            setQuery(data.transcript.trim());
+            setRecordingState('idle');
+          } else {
+            setMicErrorMessage(t('advisor.voice_no_speech'));
+            setRecordingState('idle');
+          }
+        } catch {
+          setMicErrorMessage(t('advisor.conn_error'));
+          setRecordingState('idle');
+        }
+      };
+      reader.readAsDataURL(audioBlob);
+    } catch (err: any) {
+      setMicErrorMessage(resolveVoiceErrorMessage(err, t));
+      setRecordingState('idle');
+    }
+  };
+
+  const cancelVoiceRecording = () => {
+    if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+    if (voiceRecorderSessionRef.current) {
+      voiceRecorderSessionRef.current.cancel();
+      voiceRecorderSessionRef.current = null;
+    }
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach((track) => track.stop());
+      mediaStreamRef.current = null;
+    }
+    setRecordingState('idle');
+    setRecordingDuration(0);
+  };
+
+  const toggleBrowserRecording = () => {
+    if (recordingState === 'recording') {
+      stopVoiceRecording();
+    } else {
+      startVoiceRecording();
+    }
+  };
+
+  const handleAudioFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setMicErrorMessage(null);
+    setPendingTranscript(null);
+    setRecordingState('transcribing');
+
+    const reader = new FileReader();
+    reader.onloadend = async () => {
+      const base64Audio = reader.result as string;
+      try {
+        const res = await fetch('/api/backend/voice/transcribe', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ audio_base64: base64Audio, language }),
+        });
+        const data = await res.json();
+        if (data.transcript && data.transcript.trim()) {
+          setPendingTranscript(data.transcript.trim());
+          setQuery(data.transcript.trim());
+          setRecordingState('idle');
+        } else {
+          setMicErrorMessage(t('advisor.voice_no_speech'));
+          setRecordingState('idle');
+        }
+      } catch {
+        setMicErrorMessage(t('advisor.conn_error'));
+        setRecordingState('idle');
+      }
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  const handleTestSampleVoice = () => {
+    setMicErrorMessage(null);
+    const sampleQuestion =
+      language === 'am'
+        ? 'የጤፍ ሰብል ምርታማነትን ለመጨመር ምን ዓይነት ማዳበሪያ መጠቀም አለብኝ?'
+        : language === 'om'
+        ? 'Oomisha boqqoolloo dabaluuf xa\'oo akkamii fayyadamuun qaba?'
+        : language === 'ti'
+        ? 'ምህርቲ ጣፍ ንምውሳኽ እንታይ ዓይነት ማዳበሪያ ክጥቀም ኣለኒ?'
+        : language === 'so'
+        ? 'Sidee baan u kordhin karaa wax soo saarka beeraha?'
+        : 'What fertilizer strategy should I use to maximize teff yield?';
+
+    setPendingTranscript(sampleQuestion);
+    setQuery(sampleQuestion);
+  };
+
+  // Handle Asking Agricultural Question (Voice or Text)
   const handleAsk = async (textToAsk?: string) => {
     const q = (textToAsk || query).trim();
     if (!q) return;
+    if (chatLoading) return;
 
     const userMsg: ChatMessage = {
       id: Date.now().toString(),
       sender: 'user',
       text: q,
       language,
+      isVoiceTurn: Boolean(pendingTranscript),
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     };
 
     setMessages((prev) => [...prev, userMsg]);
     setQuery('');
+    setPendingTranscript(null);
+    setMicErrorMessage(null);
     setChatLoading(true);
 
+    stopCurrentAudio();
+
+    const sid = sessionId || `web-session-${Date.now()}`;
+    if (!sessionId) setSessionId(sid);
+
     try {
-      const res = await fetch('/api/backend/ask', {
+      const res = await fetch('/api/backend/voice/ask', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question: q, language }),
+        body: JSON.stringify({
+          question: q,
+          language,
+          session_id: sid,
+          synthesize_audio: true,
+        }),
       });
       const data = await res.json();
 
       const defaultFallback =
         language === 'om'
-          ? 'Odeeffannoon hin argamne. Maaloo gaaffii keessan irra deebi\'aa yaalaa.'
+          ? "Odeeffannoon hin argamne. Maaloo gaaffii keessan irra deebi'aa yaalaa."
           : language === 'am'
           ? 'መረጃ አልተገኘም። እባክዎ ጥያቄዎን በድጋሚ ያቅርቡ።'
           : 'Information could not be retrieved. Please try asking again.';
@@ -286,9 +566,19 @@ export default function HelloFarmerApp() {
         grounded: data.grounded,
         confidence: data.confidence,
         sources_used: data.sources_used,
+        audio_base64: data.audio_base64,
+        audio_url: data.audio_url,
+        language: data.language || language,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       };
       setMessages((prev) => [...prev, assistantMsg]);
+
+      // Autoplay voice answer if enabled and available
+      if (autoPlayVoice && data.audio_base64) {
+        setTimeout(() => {
+          playMessageAudio(assistantMsg);
+        }, 120);
+      }
     } catch {
       const errorMsg: ChatMessage = {
         id: (Date.now() + 1).toString(),
@@ -302,91 +592,6 @@ export default function HelloFarmerApp() {
     } finally {
       setChatLoading(false);
     }
-  };
-
-  // Browser Voice Input (Web Speech API)
-  const toggleBrowserRecording = () => {
-    if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
-      alert(
-        language === 'om'
-          ? 'Dubbii sagalee barawzarii hin deeggaru. Maaloo Chrome fayyadamaa yookiin 8028 bilbilaa.'
-          : language === 'am'
-          ? 'የድምፅ ግብዓት በዚህ ብሮውዘር አይደገፍም። እባክዎ Chrome ይጠቀሙ ወይም 8028 ይደውሉ።'
-          : 'Browser speech recognition is not supported in this browser. Please use Chrome or dial 8028 directly.'
-      );
-      return;
-    }
-
-    if (isRecording) {
-      setIsRecording(false);
-      setBrowserVoiceStatus('idle');
-      return;
-    }
-
-    try {
-      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-      const recognition = new SpeechRecognition();
-      recognition.continuous = false;
-      recognition.interimResults = true;
-      recognition.lang = language === 'am' ? 'am-ET' : language === 'om' ? 'om-ET' : 'en-US';
-
-      recognition.onstart = () => {
-        setIsRecording(true);
-        setBrowserVoiceStatus('listening');
-        setVoiceTranscript('');
-      };
-
-      recognition.onresult = (event: any) => {
-        const transcript = Array.from(event.results)
-          .map((r: any) => r[0].transcript)
-          .join('');
-        setVoiceTranscript(transcript);
-        if (event.results[0].isFinal) {
-          setIsRecording(false);
-          setBrowserVoiceStatus('processing');
-          setQuery(transcript);
-          handleAsk(transcript);
-          setTimeout(() => setBrowserVoiceStatus('idle'), 1500);
-        }
-      };
-
-      recognition.onerror = () => {
-        setIsRecording(false);
-        setBrowserVoiceStatus('idle');
-      };
-
-      recognition.onend = () => {
-        setIsRecording(false);
-        setBrowserVoiceStatus('idle');
-      };
-
-      recognition.start();
-    } catch {
-      setIsRecording(false);
-      setBrowserVoiceStatus('idle');
-    }
-  };
-
-  // Text to Speech playback
-  const handleSpeakText = (messageId: string, text: string) => {
-    if (!('speechSynthesis' in window)) return;
-
-    if (speakingMessageId === messageId) {
-      window.speechSynthesis.cancel();
-      setSpeakingMessageId(null);
-      return;
-    }
-
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = language === 'am' ? 'am-ET' : language === 'om' ? 'om-ET' : 'en-US';
-    utterance.rate = 0.95;
-
-    utterance.onend = () => setSpeakingMessageId(null);
-    utterance.onerror = () => setSpeakingMessageId(null);
-
-    setSpeakingMessageId(messageId);
-    window.speechSynthesis.speak(utterance);
   };
 
   // Yield Prediction Trigger
@@ -1232,7 +1437,7 @@ export default function HelloFarmerApp() {
           {activeTab === 'assistant' && (
             <div className="animate-entrance" style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 140px)', maxHeight: '820px' }}>
               {/* Chat Header Card */}
-              <div className="card-interactive" style={{ padding: '1rem 1.5rem', marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div className="card-interactive" style={{ padding: '1rem 1.5rem', marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.875rem' }}>
                   <img
                     src="/hello_farmer_logo.jpg"
@@ -1249,9 +1454,44 @@ export default function HelloFarmerApp() {
                   </div>
                 </div>
 
-                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                  {/* Auto-Play Voice Toggle */}
                   <button
-                    onClick={() => setMessages([])}
+                    type="button"
+                    onClick={() => {
+                      const next = !autoPlayVoice;
+                      setAutoPlayVoice(next);
+                      if (!next) stopCurrentAudio();
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.45rem',
+                      padding: '0.45rem 0.85rem',
+                      borderRadius: 'var(--radius-full)',
+                      border: autoPlayVoice ? '1px solid var(--brand-forest-600)' : '1px solid var(--border-subtle)',
+                      backgroundColor: autoPlayVoice ? 'var(--brand-forest-50)' : '#ffffff',
+                      color: autoPlayVoice ? 'var(--brand-forest-800)' : 'var(--text-muted)',
+                      cursor: 'pointer',
+                      fontSize: '0.775rem',
+                      fontWeight: 600,
+                      transition: 'all 0.15s ease',
+                    }}
+                    title={t('advisor.voice_autoplay_label')}
+                  >
+                    {autoPlayVoice ? <Volume2 size={15} color="var(--brand-forest-700)" /> : <VolumeX size={15} />}
+                    <span>{t('advisor.voice_autoplay_label')}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      stopCurrentAudio();
+                      setMessages([]);
+                      setSessionId('');
+                      setPendingTranscript(null);
+                      setMicErrorMessage(null);
+                    }}
                     className="btn-secondary"
                     style={{ padding: '0.45rem 0.85rem', fontSize: '0.8rem' }}
                   >
@@ -1337,7 +1577,7 @@ export default function HelloFarmerApp() {
                       >
                         {/* Header for assistant message */}
                         {m.sender === 'assistant' && (
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.65rem', paddingBottom: '0.5rem', borderBottom: '1px solid var(--border-subtle)' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.65rem', paddingBottom: '0.5rem', borderBottom: '1px solid var(--border-subtle)', flexWrap: 'wrap', gap: '0.5rem' }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                               <img
                                 src="/hello_farmer_logo.jpg"
@@ -1355,14 +1595,111 @@ export default function HelloFarmerApp() {
                               >
                                 {m.grounded ? `✓ ${t('advisor.grounded_badge')}` : '⚠ Extension Verified'}
                               </span>
-                              <button
-                                onClick={() => handleSpeakText(m.id, m.text)}
-                                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}
-                                title={t('advisor.listen_btn')}
-                              >
-                                {speakingMessageId === m.id ? <VolumeX size={16} color="var(--brand-forest-700)" /> : <Volume2 size={16} />}
-                              </button>
+
+                              {/* Audio playback controls */}
+                              {playingMessageId === m.id && audioPlaybackStatus === 'playing' ? (
+                                <button
+                                  type="button"
+                                  onClick={pauseMessageAudio}
+                                  style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '0.35rem',
+                                    padding: '0.2rem 0.6rem',
+                                    borderRadius: 'var(--radius-full)',
+                                    backgroundColor: 'var(--brand-forest-100)',
+                                    border: '1px solid var(--brand-forest-400)',
+                                    color: 'var(--brand-forest-800)',
+                                    cursor: 'pointer',
+                                    fontSize: '0.75rem',
+                                    fontWeight: 700,
+                                  }}
+                                  title={t('advisor.voice_pause')}
+                                >
+                                  <Pause size={12} />
+                                  <span>{t('advisor.voice_pause')}</span>
+                                  <span className="waveform-bar" style={{ height: '10px', width: '2px', animationDelay: '0s' }} />
+                                  <span className="waveform-bar" style={{ height: '14px', width: '2px', animationDelay: '0.2s' }} />
+                                  <span className="waveform-bar" style={{ height: '8px', width: '2px', animationDelay: '0.4s' }} />
+                                </button>
+                              ) : playingMessageId === m.id && audioPlaybackStatus === 'paused' ? (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                                  <button
+                                    type="button"
+                                    onClick={resumeMessageAudio}
+                                    style={{
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: '0.3rem',
+                                      padding: '0.2rem 0.6rem',
+                                      borderRadius: 'var(--radius-full)',
+                                      backgroundColor: 'var(--brand-forest-50)',
+                                      border: '1px solid var(--brand-forest-300)',
+                                      color: 'var(--brand-forest-700)',
+                                      cursor: 'pointer',
+                                      fontSize: '0.75rem',
+                                      fontWeight: 600,
+                                    }}
+                                    title={t('advisor.voice_resume')}
+                                  >
+                                    <Play size={12} />
+                                    <span>{t('advisor.voice_resume')}</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => replayMessageAudio(m)}
+                                    style={{
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      padding: '0.2rem 0.45rem',
+                                      borderRadius: 'var(--radius-full)',
+                                      backgroundColor: 'var(--bg-subtle)',
+                                      border: '1px solid var(--border-subtle)',
+                                      color: 'var(--text-muted)',
+                                      cursor: 'pointer',
+                                    }}
+                                    title={t('advisor.voice_replay')}
+                                  >
+                                    <RotateCcw size={12} />
+                                  </button>
+                                </div>
+                              ) : playingMessageId === m.id && audioPlaybackStatus === 'loading' ? (
+                                <span style={{ fontSize: '0.725rem', color: 'var(--brand-forest-700)', display: 'flex', alignItems: 'center', gap: '0.3rem', fontWeight: 600 }}>
+                                  <RefreshCw size={12} className="animate-spin" />
+                                  {t('advisor.voice_synthesizing')}
+                                </span>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => playMessageAudio(m)}
+                                  style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '0.35rem',
+                                    padding: '0.2rem 0.6rem',
+                                    borderRadius: 'var(--radius-full)',
+                                    backgroundColor: 'var(--bg-subtle)',
+                                    border: '1px solid var(--border-subtle)',
+                                    color: 'var(--brand-forest-700)',
+                                    cursor: 'pointer',
+                                    fontSize: '0.75rem',
+                                    fontWeight: 600,
+                                  }}
+                                  title={t('advisor.voice_listen')}
+                                >
+                                  <Volume2 size={13} />
+                                  <span>{t('advisor.voice_listen')}</span>
+                                </button>
+                              )}
                             </div>
+                          </div>
+                        )}
+
+                        {/* User voice question indicator */}
+                        {m.sender === 'user' && m.isVoiceTurn && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', marginBottom: '0.35rem', fontSize: '0.725rem', color: 'rgba(255,255,255,0.85)' }}>
+                            <Mic size={12} />
+                            <span>{t('advisor.voice_record')}</span>
                           </div>
                         )}
 
@@ -1427,28 +1764,319 @@ export default function HelloFarmerApp() {
                 <div ref={chatEndRef} />
               </div>
 
+              {/* Error Notification Banner */}
+              {micErrorMessage && (
+                <div
+                  style={{
+                    padding: '0.75rem 1rem',
+                    backgroundColor: '#fffbeb',
+                    border: '1px solid #fef3c7',
+                    borderRadius: 'var(--radius-md)',
+                    marginTop: '0.75rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '0.75rem',
+                    fontSize: '0.85rem',
+                    color: '#92400e',
+                    flexWrap: 'wrap',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <AlertTriangle size={16} color="#d97706" />
+                    <span>{micErrorMessage}</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <button
+                      type="button"
+                      onClick={() => audioFileInputRef.current?.click()}
+                      style={{
+                        padding: '0.35rem 0.75rem',
+                        fontSize: '0.78rem',
+                        fontWeight: 600,
+                        backgroundColor: '#fde68a',
+                        border: '1px solid #f59e0b',
+                        borderRadius: 'var(--radius-sm)',
+                        cursor: 'pointer',
+                        color: '#78350f',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.35rem',
+                      }}
+                    >
+                      <Upload size={13} />
+                      <span>{t('advisor.voice_upload_audio')}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleTestSampleVoice}
+                      style={{
+                        padding: '0.35rem 0.75rem',
+                        fontSize: '0.78rem',
+                        fontWeight: 600,
+                        backgroundColor: '#dcfce7',
+                        border: '1px solid #86efac',
+                        borderRadius: 'var(--radius-sm)',
+                        cursor: 'pointer',
+                        color: '#166534',
+                      }}
+                    >
+                      {t('advisor.voice_try_sample')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setMicErrorMessage(null)}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#92400e', marginLeft: '0.25rem' }}
+                    >
+                      <X size={15} />
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Active Recording Floating Card */}
+              {recordingState === 'recording' && (
+                <div
+                  style={{
+                    padding: '0.75rem 1.25rem',
+                    backgroundColor: '#fef2f2',
+                    border: '1px solid #fecaca',
+                    borderRadius: 'var(--radius-lg)',
+                    marginTop: '0.75rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '1rem',
+                    boxShadow: '0 4px 14px rgba(220, 38, 38, 0.12)',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                    <span
+                      style={{
+                        width: '12px',
+                        height: '12px',
+                        borderRadius: '50%',
+                        backgroundColor: '#dc2626',
+                        display: 'inline-block',
+                        boxShadow: '0 0 8px #dc2626',
+                      }}
+                    />
+                    <span style={{ fontWeight: 800, color: '#dc2626', fontSize: '0.95rem', fontFamily: 'monospace' }}>
+                      {Math.floor(recordingDuration / 60).toString().padStart(2, '0')}:{(recordingDuration % 60).toString().padStart(2, '0')}
+                    </span>
+                    <span style={{ fontSize: '0.85rem', color: '#991b1b', fontWeight: 600 }}>
+                      {t('advisor.voice_recording')}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <button
+                      type="button"
+                      onClick={stopVoiceRecording}
+                      className="btn-primary"
+                      style={{
+                        padding: '0.45rem 0.95rem',
+                        fontSize: '0.8rem',
+                        backgroundColor: '#dc2626',
+                        borderColor: '#dc2626',
+                        color: '#ffffff',
+                        borderRadius: 'var(--radius-full)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.35rem',
+                      }}
+                    >
+                      <Check size={14} />
+                      <span>{t('advisor.voice_stop')}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={cancelVoiceRecording}
+                      className="btn-secondary"
+                      style={{
+                        padding: '0.45rem 0.85rem',
+                        fontSize: '0.8rem',
+                        borderRadius: 'var(--radius-full)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.35rem',
+                      }}
+                    >
+                      <X size={14} />
+                      <span>{t('advisor.voice_cancel')}</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Transcribing Progress Banner */}
+              {recordingState === 'transcribing' && (
+                <div
+                  style={{
+                    padding: '0.75rem 1.25rem',
+                    backgroundColor: 'var(--brand-forest-50)',
+                    border: '1px solid var(--brand-forest-200)',
+                    borderRadius: 'var(--radius-lg)',
+                    marginTop: '0.75rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.75rem',
+                  }}
+                >
+                  <RefreshCw size={18} className="animate-spin" color="var(--brand-forest-700)" />
+                  <span style={{ fontSize: '0.875rem', color: 'var(--brand-forest-800)', fontWeight: 600 }}>
+                    {t('advisor.voice_transcribing')}
+                  </span>
+                </div>
+              )}
+
+              {/* Recognized Transcript Confirmation / Editing Banner */}
+              {pendingTranscript && (
+                <div
+                  style={{
+                    padding: '0.85rem 1.25rem',
+                    backgroundColor: '#f0fdf4',
+                    border: '1px solid #bbf7d0',
+                    borderRadius: 'var(--radius-lg)',
+                    marginTop: '0.75rem',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0.5rem',
+                    boxShadow: 'var(--shadow-sm)',
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: '0.775rem', fontWeight: 800, color: 'var(--brand-forest-800)', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                      <Mic size={13} color="var(--brand-forest-700)" />
+                      {t('advisor.voice_transcript_title')}
+                    </span>
+                    <span style={{ fontSize: '0.725rem', color: 'var(--text-muted)' }}>
+                      {t('advisor.voice_edit_prompt')}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                    <input
+                      type="text"
+                      value={query}
+                      onChange={(e) => setQuery(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && handleAsk()}
+                      style={{
+                        flex: 1,
+                        padding: '0.55rem 0.85rem',
+                        borderRadius: 'var(--radius-md)',
+                        border: '1px solid var(--brand-forest-300)',
+                        backgroundColor: '#ffffff',
+                        fontSize: '0.925rem',
+                        color: 'var(--text-main)',
+                        outline: 'none',
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleAsk()}
+                      disabled={chatLoading || !query.trim()}
+                      className="btn-primary"
+                      style={{
+                        padding: '0.55rem 1.15rem',
+                        borderRadius: 'var(--radius-md)',
+                        fontSize: '0.85rem',
+                        fontWeight: 700,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.35rem',
+                      }}
+                    >
+                      <Send size={14} />
+                      <span>{t('advisor.voice_send_btn')}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPendingTranscript(null);
+                        setQuery('');
+                      }}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        cursor: 'pointer',
+                        color: 'var(--text-muted)',
+                        padding: '0.4rem',
+                      }}
+                      title={t('advisor.voice_cancel')}
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {/* Chat Input Bar */}
-              <div className="card-interactive" style={{ padding: '0.875rem 1.25rem', marginTop: '1rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+              <div className="card-interactive" style={{ padding: '0.875rem 1.25rem', marginTop: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                {/* Hidden Audio File Input */}
+                <input
+                  type="file"
+                  ref={audioFileInputRef}
+                  onChange={handleAudioFileUpload}
+                  accept="audio/*"
+                  style={{ display: 'none' }}
+                />
+
+                {/* Voice Record / Stop Button */}
                 <button
                   type="button"
-                  onClick={toggleBrowserRecording}
+                  onClick={() => {
+                    if (recordingState === 'recording') {
+                      stopVoiceRecording();
+                    } else {
+                      startVoiceRecording();
+                    }
+                  }}
+                  disabled={chatLoading || recordingState === 'transcribing'}
                   style={{
                     width: '44px',
                     height: '44px',
                     borderRadius: '50%',
                     border: 'none',
-                    backgroundColor: isRecording ? '#dc2626' : 'var(--bg-subtle)',
-                    color: isRecording ? '#ffffff' : 'var(--text-body)',
+                    backgroundColor: recordingState === 'recording' ? '#dc2626' : 'var(--bg-subtle)',
+                    color: recordingState === 'recording' ? '#ffffff' : 'var(--brand-forest-700)',
                     cursor: 'pointer',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     transition: 'all 0.18s ease',
-                    boxShadow: isRecording ? '0 0 12px rgba(220, 38, 38, 0.5)' : 'none',
+                    boxShadow: recordingState === 'recording' ? '0 0 14px rgba(220, 38, 38, 0.55)' : 'none',
                   }}
-                  title={isRecording ? 'Stop' : 'Voice Input'}
+                  title={recordingState === 'recording' ? t('advisor.voice_stop') : t('advisor.voice_record')}
                 >
-                  {isRecording ? <MicOff size={20} /> : <Mic size={20} />}
+                  {recordingState === 'recording' ? (
+                    <Square size={18} fill="#ffffff" />
+                  ) : recordingState === 'transcribing' ? (
+                    <RefreshCw size={18} className="animate-spin" />
+                  ) : (
+                    <Mic size={20} />
+                  )}
+                </button>
+
+                {/* Upload Audio File Button */}
+                <button
+                  type="button"
+                  onClick={() => audioFileInputRef.current?.click()}
+                  disabled={chatLoading || recordingState === 'transcribing' || recordingState === 'recording'}
+                  style={{
+                    width: '40px',
+                    height: '40px',
+                    borderRadius: '50%',
+                    border: 'none',
+                    backgroundColor: 'var(--bg-subtle)',
+                    color: 'var(--brand-forest-700)',
+                    cursor: (chatLoading || recordingState === 'transcribing' || recordingState === 'recording') ? 'not-allowed' : 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    transition: 'all 0.18s ease',
+                  }}
+                  title={t('advisor.voice_upload_audio')}
+                >
+                  <Upload size={18} />
                 </button>
 
                 <input
@@ -1456,7 +2084,7 @@ export default function HelloFarmerApp() {
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleAsk()}
-                  placeholder={isRecording ? t('advisor.listening') : t('advisor.input_placeholder')}
+                  placeholder={recordingState === 'recording' ? t('advisor.voice_recording') : t('advisor.input_placeholder')}
                   style={{
                     flex: 1,
                     border: 'none',
@@ -1472,7 +2100,7 @@ export default function HelloFarmerApp() {
                   onClick={() => handleAsk()}
                   disabled={chatLoading || !query.trim()}
                   className="btn-primary"
-                  style={{ borderRadius: 'var(--radius-full)', padding: '0.65rem 1.25rem' }}
+                  style={{ borderRadius: 'var(--radius-full)', padding: '0.65rem 1.25rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
                 >
                   <span>{t('advisor.btn_send')}</span>
                   <Send size={16} />
@@ -1710,31 +2338,43 @@ export default function HelloFarmerApp() {
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1.5rem' }}>
                   <button
                     onClick={toggleBrowserRecording}
+                    disabled={chatLoading || recordingState === 'transcribing'}
                     style={{
                       width: '96px',
                       height: '96px',
                       borderRadius: '50%',
                       border: 'none',
-                      backgroundColor: isRecording ? '#dc2626' : 'var(--brand-forest-700)',
+                      backgroundColor: recordingState === 'recording' ? '#dc2626' : 'var(--brand-forest-700)',
                       color: '#ffffff',
-                      cursor: 'pointer',
+                      cursor: (chatLoading || recordingState === 'transcribing') ? 'not-allowed' : 'pointer',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      boxShadow: isRecording
+                      boxShadow: recordingState === 'recording'
                         ? '0 0 0 16px rgba(220, 38, 38, 0.25), 0 8px 24px rgba(220, 38, 38, 0.4)'
                         : '0 0 0 12px var(--brand-forest-50), 0 8px 24px rgba(30, 86, 66, 0.25)',
                       transition: 'all 0.25s ease',
                     }}
                   >
-                    {isRecording ? <MicOff size={40} /> : <Mic size={40} />}
+                    {recordingState === 'recording' ? (
+                      <Square size={36} fill="#ffffff" />
+                    ) : recordingState === 'transcribing' ? (
+                      <RefreshCw size={36} className="animate-spin" />
+                    ) : (
+                      <Mic size={40} />
+                    )}
                   </button>
 
                   <div style={{ minHeight: '36px' }}>
-                    {isRecording ? (
+                    {recordingState === 'recording' ? (
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#dc2626', fontWeight: 700 }}>
                         <span style={{ display: 'inline-block', width: '10px', height: '10px', borderRadius: '50%', backgroundColor: '#dc2626' }} className="animate-pulse" />
-                        <span>{t('voice.mic_listening')}</span>
+                        <span>{t('voice.mic_listening')} ({recordingDuration}s)</span>
+                      </div>
+                    ) : recordingState === 'transcribing' ? (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--brand-forest-700)', fontWeight: 600 }}>
+                        <RefreshCw size={16} className="animate-spin" />
+                        <span>{t('advisor.voice_transcribing')}</span>
                       </div>
                     ) : (
                       <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
@@ -1743,10 +2383,45 @@ export default function HelloFarmerApp() {
                     )}
                   </div>
 
-                  {voiceTranscript && (
-                    <div style={{ maxWidth: '600px', width: '100%', padding: '1rem', backgroundColor: 'var(--bg-subtle)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)', textAlign: 'left' }}>
-                      <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>Heard speech:</span>
-                      <p style={{ margin: '0.25rem 0 0 0', fontWeight: 600, color: 'var(--text-main)' }}>"{voiceTranscript}"</p>
+                  {micErrorMessage && (
+                    <div
+                      style={{
+                        maxWidth: '520px',
+                        width: '100%',
+                        padding: '0.75rem 1rem',
+                        backgroundColor: '#fffbeb',
+                        border: '1px solid #fef3c7',
+                        borderRadius: 'var(--radius-md)',
+                        color: '#92400e',
+                        fontSize: '0.85rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '0.5rem',
+                      }}
+                    >
+                      <AlertTriangle size={16} color="#d97706" />
+                      <span>{micErrorMessage}</span>
+                    </div>
+                  )}
+
+                  {pendingTranscript && (
+                    <div style={{ maxWidth: '600px', width: '100%', padding: '1rem', backgroundColor: '#f0fdf4', borderRadius: 'var(--radius-md)', border: '1px solid #bbf7d0', textAlign: 'left', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem' }}>
+                      <div>
+                        <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--brand-forest-800)' }}>{t('advisor.voice_transcript_title')}</span>
+                        <p style={{ margin: '0.25rem 0 0 0', fontWeight: 600, color: 'var(--text-main)' }}>"{pendingTranscript}"</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveTab('assistant');
+                          handleAsk(pendingTranscript);
+                        }}
+                        className="btn-primary"
+                        style={{ padding: '0.45rem 0.85rem', fontSize: '0.8rem', whiteSpace: 'nowrap' }}
+                      >
+                        {t('advisor.voice_send_btn')}
+                      </button>
                     </div>
                   )}
                 </div>
