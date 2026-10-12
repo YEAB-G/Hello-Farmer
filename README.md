@@ -433,11 +433,16 @@ Contributions to Hello Farmer are welcome! Follow these steps:
 
 ---
 
-## 📄 License & Maintainers
+## 📄 License & Project Team
 
 * **License**: Open Source under the **[MIT License](LICENSE)**.
-* **Author & Lead Contributor**: **Yeabsira Girma** ([@YEAB-G](https://github.com/YEAB-G))
-* **Repository**: [https://github.com/YEAB-G/Hello-Farmer](https://github.com/YEAB-G/Hello-Farmer)
+* **Core Team & Contributors**:
+  * **Yeabsira Girma** ([@YEAB-G](https://github.com/YEAB-G))
+  * **KalMesKeb** ([@KalMesKeb](https://github.com/KalMesKeb))
+  * **Yohannes Girma** ([@jho-G](https://github.com/jho-G))
+* **Repositories**:
+  * [https://github.com/YEAB-G/Hello-Farmer](https://github.com/YEAB-G/Hello-Farmer)
+  * [https://github.com/jho-G/Hello-Farmer](https://github.com/jho-G/Hello-Farmer)
 
 ---
 
