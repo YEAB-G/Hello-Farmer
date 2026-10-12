@@ -211,7 +211,7 @@ class CallStateMachine:
                 self.session_state.consecutive_silence_count = 0
                 self.session_state.turn_count += 1
 
-                # State 4: THINK
+                # State 4: THINK (silent to respond directly and faster without playing "please wait")
                 await self._state_think()
 
                 # State 5: Core Processing & SPEAK
@@ -241,8 +241,8 @@ class CallStateMachine:
         """State 1: Play disclaimer and greeting."""
         print("▶️ [STATE: ANSWER] Playing bilingual greeting...", flush=True)
         await self._play_prompt("greeting", "am")
-        await asyncio.sleep(0.1)
-        self.conn.drain_audio_buffer()
+        await asyncio.sleep(0.2)
+        await self.conn.drain_audio_buffer()
 
     async def _state_consent(self):
         """State 2: Voice consent question for first-time callers."""
@@ -252,7 +252,7 @@ class CallStateMachine:
         """State 3: Listen for caller utterance with VAD."""
         turn_num = self.session_state.turn_count + 1
         print(f"\n👂 [STATE: LISTEN] Turn #{turn_num} | Listening for caller voice (Threshold: {self.endpointer.energy_threshold})...", flush=True)
-        self.conn.drain_audio_buffer()
+        await self.conn.drain_audio_buffer()
         self.endpointer.reset()
         self.endpointer.initial_silence_timeout_sec = 10.0
         speech_pcm = await self._collect_speech_frames()
@@ -269,9 +269,8 @@ class CallStateMachine:
         return speech_pcm
 
     async def _state_think(self):
-        """State 4: Play immediate thinking cue ("One moment...")."""
-        print("🤔 [STATE: THINK] Processing... Playing 'one moment' prompt.", flush=True)
-        await self._play_prompt("one_moment", self.session_state.language)
+        """State 4: Thinking state - silent to respond directly and faster without interruption."""
+        pass
 
     async def _state_speak(self, audio_pcm: bytes):
         """State 5: Run AI pipeline, check confidence, stream answer back."""
@@ -325,11 +324,13 @@ class CallStateMachine:
             print(f"🔊 [AUDIO STREAMING] Sending {len(response.audio)} bytes ({len(response.audio)/16000:.1f}s) to Asterisk...", flush=True)
             await self.conn.send_audio(response.audio)
             print(f"✅ [AUDIO STREAMED] Playback complete. Moving to next turn.\n", flush=True)
-            self.conn.drain_audio_buffer()
+            await asyncio.sleep(0.25)
+            await self.conn.drain_audio_buffer()
         else:
             print("⚠️ [AUDIO EMPTY] Falling back to pre-rendered audio.", flush=True)
             await self._play_prompt("safe_fallback", self.session_state.language)
-            self.conn.drain_audio_buffer()
+            await asyncio.sleep(0.25)
+            await self.conn.drain_audio_buffer()
 
     async def _collect_speech_frames(self) -> Optional[bytes]:
         """Read 20ms audio frames from AudioSocket connection and feed VAD endpointer."""
