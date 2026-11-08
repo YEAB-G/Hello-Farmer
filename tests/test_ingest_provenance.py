@@ -93,3 +93,4 @@ def test_sha256_cryptographic_checksum_computation():
     assert hasattr(doc, "sha256_hash")
     assert len(doc.sha256_hash) == 64, "Expected valid 64-char hex SHA-256 hash"
     assert int(doc.sha256_hash, 16) > 0
+

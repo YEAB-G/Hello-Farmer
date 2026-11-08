@@ -126,3 +126,4 @@ The following components represent high-value engineering that must be preserved
 5. **Geocoding & Agroecological Engine (`backend/app/weather/location.py`)**: 50+ Ethiopian woredas and zones mapped to elevation profiles.
 6. **Pre-rendered Telephony Audio Cues (`backend/cache/prompts/`)**: High-quality 8kHz SLIN audio prompts for call state transitions.
 7. **Curated Agricultural Knowledge Base (`knowledge_base/raw/MoA Guidelines/`)**: 80+ official MoA technical packages.
+

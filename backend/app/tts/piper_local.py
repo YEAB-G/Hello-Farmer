@@ -111,3 +111,4 @@ class PiperLocalTTSProvider(BaseTTSProvider):
 
         # Fallback to spoken telephony prompts (never return acoustic sine beeps)
         return await self.fallback_synth._synthesize_raw(text, voice=voice, language=language, rate=rate)
+

@@ -233,3 +233,4 @@ flowchart LR
 ---
 
 *Verified and aligned with all 20 non-negotiable engineering rules.*
+

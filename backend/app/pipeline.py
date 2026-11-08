@@ -272,7 +272,7 @@ async def process_utterance(
             metadata=ResponseMetadata(
                 grounded=False,
                 confidence=0.0,
-                latency_ms={"total": round((time.time() - t0) * 1000, 1)},
+                latency_ms={"total": round((time.time() - t0) * 1000, 1), **latencies},
             ),
         )
 

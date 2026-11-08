@@ -109,3 +109,4 @@ def test_stt_provider_factory_routing():
 
     multi_prov = get_stt_provider("multilingual")
     assert isinstance(multi_prov, MultilingualSTTRouter)
+

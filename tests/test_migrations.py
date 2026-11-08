@@ -41,3 +41,4 @@ def test_target_metadata_includes_core_models():
     ]
     for table_name in required_tables:
         assert table_name in tables, f"Expected table '{table_name}' in Base.metadata!"
+

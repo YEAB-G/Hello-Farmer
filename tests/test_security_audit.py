@@ -84,3 +84,4 @@ def test_production_environment_fails_fast_on_insecure_defaults():
     )
     with pytest.raises(ValueError, match="CRITICAL SECURITY ERROR"):
         prod_settings.validate_production_secrets()
+

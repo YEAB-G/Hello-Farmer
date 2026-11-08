@@ -122,6 +122,21 @@ def load_yaml_config(path: str = "config.yaml") -> dict[str, Any]:
 
 
 settings = AppSettings()
+# Seamless localhost fallback for host-based development when outside docker network
+if "@postgres:" in settings.DATABASE_URL:
+    try:
+        import socket
+        socket.gethostbyname("postgres")
+    except Exception:
+        settings.DATABASE_URL = settings.DATABASE_URL.replace("@postgres:", "@127.0.0.1:")
+
+if "redis://redis:" in settings.REDIS_URL:
+    try:
+        import socket
+        socket.gethostbyname("redis")
+    except Exception:
+        settings.REDIS_URL = settings.REDIS_URL.replace("redis://redis:", "redis://127.0.0.1:")
+
 if os.getenv("ALLOWED_ORIGINS"):
     settings.ALLOWED_ORIGINS = [orig.strip() for orig in os.getenv("ALLOWED_ORIGINS").split(",") if orig.strip()]
 settings.validate_production_secrets()
