@@ -2,10 +2,13 @@
 import sys
 from pathlib import Path
 
-# Ensure project root is in sys.path
+# Ensure project root and backend are in sys.path
 root_dir = Path(__file__).resolve().parent.parent
 if str(root_dir) not in sys.path:
     sys.path.insert(0, str(root_dir))
+backend_dir = root_dir / "backend"
+if backend_dir.exists() and str(backend_dir) not in sys.path:
+    sys.path.insert(0, str(backend_dir))
 
 # Support container execution where app resides in /app/app
 if Path("/app/app").exists():

@@ -14,7 +14,7 @@ def test_prompts_structure_and_formatting():
     """Verify system prompt enforces sentence limits, spoken style, and JSON schema."""
     sys_am = build_system_prompt("am")
     assert "WRITE ALL NUMBERS AS WORDS" in sys_am
-    assert "At most 3 short sentences" in sys_am
+    assert "2 to 3 short sentences" in sys_am
     assert "NEVER invent or guess pesticide names" in sys_am
 
     sys_om = build_system_prompt("om")

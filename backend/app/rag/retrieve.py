@@ -1,18 +1,19 @@
-"""Agricultural Knowledge Base Retrieval Engine.
+"""Agricultural Knowledge Base Hybrid Retrieval Engine.
 
 Implements:
-- Vector similarity search via PostgreSQL pgvector cosine distance.
-- Location-Aware Regional Agricultural Retrieval & Reranking:
-  1. Locality specific trials & manuals (town / woreda) -> Top boost (+0.20)
-  2. Regional state & zone evidence (regional bureaus & research centers) -> Regional boost (+0.12)
-  3. Agroecological zone matching (Highland/Dega, Midland, Lowland/Kolla) -> Context boost (+0.08)
-  4. National MoA / EIAR technical guidance -> Reliable baseline
-- Cross-lingual retrieval (Amharic / Afaan Oromo matching English & vernacular chunks).
-- Similarity threshold filtering (below threshold -> question 'not covered').
-- Source tier attribution (Tiers 1, 2, 3, and placeholder).
+1. Dense Vector Similarity Search via PostgreSQL pgvector cosine distance.
+2. BM25 Lexical Keyword Search for Ethiopian vernacular terms, local weed names, and fertilizers.
+3. Reciprocal Rank Fusion (RRF) combining dense semantic and sparse lexical rankings.
+4. Local Cross-Reranking with Geographic & Agroecological Boosts:
+   - Specific Locality match (town / woreda) -> Top boost (+0.20)
+   - Regional state & zone evidence -> Regional boost (+0.12)
+   - Agroecological zone matching (Highland/Dega, Midland, Lowland/Kolla) -> Context boost (+0.08)
+5. Zero pseudo-randomness, strict adherence to Rule 9.
 """
 import logging
-from typing import Any
+import math
+import re
+from typing import Any, Optional
 
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -36,7 +37,9 @@ class RetrievedPassage(BaseModel):
     document_title: str
     content: str
     source_tier: int
-    score: float  # Cosine similarity score + geographic relevance boost (0.0 to 1.0+)
+    score: float  # Hybrid RRF score + geographic relevance boost (0.0 to 1.0+)
+    dense_score: float = 0.0
+    bm25_score: float = 0.0
     crop: str | None = None
     topic: str | None = None
     page_number: int | None = None
@@ -47,8 +50,16 @@ class RetrievedPassage(BaseModel):
 
 # Regional keywords mapping for content search
 REGION_SYNONYMS = {
-    "Oromia": ["oromia", "oromiyaa", "ኦሮሚያ", "arsi", "አርሲ", "shewa", "ሸዋ", "bale", "ባሌ", "jimma", "ጅማ", "wollega", "ወለጋ", "kulumsa", "ኩሉምሳ", "bako", "ባኮ", "melkassa", "መልካሳ", "holeta", "ሆለታ", "adama", "አዳማ", "bishoftu", "ቢሾፍቱ"],
-    "Amhara": ["amhara", "አማራ", "gojjam", "ጎጃም", "wollo", "ወሎ", "gondar", "ጎንደር", "shewa", "ሸዋ", "debre birhan", "ደብረ ብርሃን", "bahir dar", "ባህር ዳር", "adet", "አዴት", "sirinka", "ስሪንቃ", "kombolcha", "ኮምቦልቻ"],
+    "Oromia": [
+        "oromia", "oromiyaa", "ኦሮሚያ", "arsi", "አርሲ", "shewa", "ሸዋ", "bale", "ባሌ",
+        "jimma", "ጅማ", "wollega", "ወለጋ", "kulumsa", "ኩሉምሳ", "bako", "ባኮ",
+        "melkassa", "መልካሳ", "holeta", "ሆለታ", "adama", "አዳማ", "bishoftu", "ቢሾፍቱ"
+    ],
+    "Amhara": [
+        "amhara", "አማራ", "gojjam", "ጎጃም", "wollo", "ወሎ", "gondar", "ጎንደር",
+        "shewa", "ሸዋ", "debre birhan", "ደብረ ብርሃን", "bahir dar", "ባህር ዳር",
+        "adet", "አዴት", "sirinka", "ስሪንቃ", "kombolcha", "ኮምቦልቻ"
+    ],
     "Tigray": ["tigray", "ትግራይ", "mekelle", "መቀሌ", "መቐለ", "shire", "ሽሬ", "alamata", "አላማጣ", "axum", "አክሱም"],
     "Sidama": ["sidama", "ሲዳማ", "hawassa", "ሀዋሳ", "awassa", "አዋሳ", "wondo genet", "ወንዶ ገነት"],
     "South Ethiopia": ["wolaita", "ዎላይታ", "sodo", "ሶዶ", "arba minch", "አርባ ምንጭ", "gamo", "ጋሞ", "gedeo", "ጌዴኦ"],
@@ -60,10 +71,93 @@ REGION_SYNONYMS = {
 }
 
 AGROECOLOGY_KEYWORDS = {
-    "Highland": ["highland", "dega", "ደጋ", "frost", "ውርጭ", "vertisol", "black soil", "አሲዳማ", "acidic", "nitisol", "cool", "cold", "ቀዝቃዛ", "2400m", "2500m", "2600m", "2800m"],
-    "Midland": ["midland", "weyna dega", "ወይና ደጋ", "medium rainfall", "loam", "1800m", "2000m", "2200m"],
-    "Lowland": ["lowland", "kolla", "ቆላ", "bereha", "በረሃ", "drought", "ድርቅ", "semi-arid", "arid", "warm", "hot", "ሞቃት", "1500m", "1200m", "1000m"],
+    "Highland": [
+        "highland", "dega", "ደጋ", "frost", "ውርጭ", "vertisol", "black soil",
+        "አሲዳማ", "acidic", "nitisol", "cool", "cold", "ቀዝቃዛ", "2400m", "2500m", "2600m", "2800m"
+    ],
+    "Midland": [
+        "midland", "weyna dega", "ወይና ደጋ", "medium rainfall", "loam", "1800m", "2000m", "2200m"
+    ],
+    "Lowland": [
+        "lowland", "kolla", "ቆላ", "bereha", "በረሃ", "drought", "ድርቅ",
+        "semi-arid", "arid", "warm", "hot", "ሞቃት", "1500m", "1200m", "1000m"
+    ],
 }
+
+
+def tokenize_ethiopian_text(text: str) -> list[str]:
+    """Tokenize multilingual Ethiopian text into words and sub-tokens.
+    
+    Preserves Ge'ez fidel script characters (\u1200-\u137F) and Latin alphabets.
+    """
+    if not text:
+        return []
+    tokens = re.findall(r"[\w\u1200-\u137F]+", text.lower())
+    return [t for t in tokens if len(t) > 1]
+
+
+def compute_bm25_scores(
+    query_tokens: list[str],
+    documents: list[list[str]],
+    k1: float = 1.2,
+    b: float = 0.75,
+) -> list[float]:
+    """Compute BM25 scores for a list of tokenized documents given query tokens."""
+    n_docs = len(documents)
+    if n_docs == 0 or not query_tokens:
+        return [0.0] * n_docs
+
+    doc_lengths = [len(doc) for doc in documents]
+    avg_len = sum(doc_lengths) / max(n_docs, 1)
+
+    # Document frequency
+    df: dict[str, int] = {}
+    for doc in documents:
+        seen = set(doc)
+        for t in seen:
+            df[t] = df.get(t, 0) + 1
+
+    scores = []
+    for i, doc in enumerate(documents):
+        doc_len = doc_lengths[i]
+        score = 0.0
+        doc_freqs: dict[str, int] = {}
+        for t in doc:
+            doc_freqs[t] = doc_freqs.get(t, 0) + 1
+
+        for q in query_tokens:
+            if q not in df:
+                continue
+            # Smoothed Robertson-Spärck Jones IDF
+            q_df = df[q]
+            idf = math.log((n_docs - q_df + 0.5) / (q_df + 0.5) + 1.0)
+            tf = doc_freqs.get(q, 0)
+            num = tf * (k1 + 1.0)
+            den = tf + k1 * (1.0 - b + b * (doc_len / max(avg_len, 1.0)))
+            score += idf * (num / max(den, 1e-6))
+        scores.append(score)
+
+    return scores
+
+
+def reciprocal_rank_fusion(
+    dense_ranks: dict[str, int],
+    bm25_ranks: dict[str, int],
+    k: int = 60,
+    dense_weight: float = 1.0,
+    bm25_weight: float = 0.8,
+) -> dict[str, float]:
+    """Compute Reciprocal Rank Fusion (RRF) scores across dense and sparse rankings."""
+    all_ids = set(dense_ranks.keys()) | set(bm25_ranks.keys())
+    rrf_scores: dict[str, float] = {}
+    for doc_id in all_ids:
+        score = 0.0
+        if doc_id in dense_ranks:
+            score += dense_weight / (k + dense_ranks[doc_id])
+        if doc_id in bm25_ranks:
+            score += bm25_weight / (k + bm25_ranks[doc_id])
+        rrf_scores[doc_id] = score
+    return rrf_scores
 
 
 async def retrieve_passages(
@@ -75,20 +169,7 @@ async def retrieve_passages(
     location: Any | None = None,
     region_filter: str | None = None,
 ) -> list[RetrievedPassage]:
-    """Retrieve top-k relevant knowledge passages from pgvector with location awareness.
-
-    Args:
-        query: Caller or user question text.
-        session: Database async session.
-        top_k: Maximum number of chunks to return.
-        similarity_threshold: Minimum cosine similarity score (defaults to config: 0.65).
-        crop_filter: Optional crop filter (e.g. 'teff', 'wheat', 'maize').
-        location: Optional LocationMatch instance representing caller's locality.
-        region_filter: Optional explicit region string (e.g. 'Oromia', 'Amhara').
-
-    Returns:
-        List of RetrievedPassage objects prioritized by locality, regional evidence, and semantic similarity.
-    """
+    """Retrieve top-k relevant knowledge passages using Hybrid RAG (pgvector + BM25 + RRF)."""
     if not query or not query.strip():
         return []
 
@@ -98,8 +179,9 @@ async def retrieve_passages(
 
     embedder = get_embedding_provider()
     query_vector = await embedder.embed_query(query)
+    query_tokens = tokenize_ethiopian_text(query)
 
-    # Use pgvector cosine distance: <=> operator
+    # 1. Candidate pool retrieval via pgvector
     cosine_dist = KnowledgeChunk.embedding.cosine_distance(query_vector)
 
     stmt = (
@@ -107,7 +189,7 @@ async def retrieve_passages(
             KnowledgeChunk,
             AgriculturalDocument.title.label("doc_title"),
             AgriculturalDocument.source_tier.label("doc_tier"),
-            (1.0 - cosine_dist).label("similarity_score"),
+            (1.0 - cosine_dist).label("dense_similarity"),
         )
         .join(AgriculturalDocument, KnowledgeChunk.document_id == AgriculturalDocument.id)
         .where(KnowledgeChunk.embedding.is_not(None))
@@ -116,11 +198,40 @@ async def retrieve_passages(
     if crop_filter:
         stmt = stmt.where(KnowledgeChunk.crop == crop_filter)
 
-    # Retrieve candidate pool for location-aware ranking (3x top_k)
-    stmt = stmt.order_by(cosine_dist.asc()).limit(max(top_k * 4, 20))
+    # Retrieve candidate pool for hybrid rank fusion (30 candidates)
+    stmt = stmt.order_by(cosine_dist.asc()).limit(max(top_k * 6, 30))
 
     result = await session.execute(stmt)
     rows = result.all()
+
+    if not rows:
+        return []
+
+    # 2. Compute Dense Ranks
+    dense_ranks: dict[str, int] = {}
+    dense_scores_map: dict[str, float] = {}
+    row_map: dict[str, tuple] = {}
+    doc_tokens_list: list[list[str]] = []
+    chunk_ids_order: list[str] = []
+
+    for rank, (chunk, doc_title, doc_tier, dense_sim) in enumerate(rows, start=1):
+        c_id = chunk.id
+        dense_ranks[c_id] = rank
+        dense_scores_map[c_id] = float(dense_sim) if dense_sim is not None else 0.0
+        row_map[c_id] = (chunk, doc_title, doc_tier)
+        doc_tokens_list.append(tokenize_ethiopian_text(chunk.content or ""))
+        chunk_ids_order.append(c_id)
+
+    # 3. Compute BM25 Lexical Scores and Ranks
+    raw_bm25 = compute_bm25_scores(query_tokens, doc_tokens_list)
+    bm25_with_ids = list(zip(chunk_ids_order, raw_bm25))
+    # Sort descending by BM25 score
+    bm25_with_ids.sort(key=lambda x: x[1], reverse=True)
+    bm25_ranks: dict[str, int] = {c_id: r for r, (c_id, _) in enumerate(bm25_with_ids, start=1)}
+    bm25_scores_map: dict[str, float] = {c_id: score for c_id, score in bm25_with_ids}
+
+    # 4. Reciprocal Rank Fusion
+    rrf_map = reciprocal_rank_fusion(dense_ranks, bm25_ranks, k=60, dense_weight=1.0, bm25_weight=0.8)
 
     # Extract target geographic tokens
     target_town = ""
@@ -143,10 +254,22 @@ async def retrieve_passages(
     regional_synonyms = REGION_SYNONYMS.get(target_region, [])
     agro_keywords = AGROECOLOGY_KEYWORDS.get(target_agroecology, [])
 
+    # 5. Local Cross-Reranker and Geographic Context Boosting
     candidate_passages: list[RetrievedPassage] = []
 
-    for chunk, doc_title, doc_tier, similarity_score in rows:
-        base_score = float(similarity_score) if similarity_score is not None else 0.0
+    # Normalize RRF to 0.0 - 1.0 range
+    max_rrf = max(rrf_map.values()) if rrf_map else 1.0
+    min_rrf = min(rrf_map.values()) if rrf_map else 0.0
+    rrf_span = max(max_rrf - min_rrf, 1e-6)
+
+    for c_id, (chunk, doc_title, doc_tier) in row_map.items():
+        base_rrf = (rrf_map.get(c_id, 0.0) - min_rrf) / rrf_span
+        dense_score = dense_scores_map.get(c_id, 0.0)
+        bm25_score = bm25_scores_map.get(c_id, 0.0)
+
+        # Baseline blended score
+        fused_score = 0.55 * dense_score + 0.45 * base_rrf
+
         content_lower = (chunk.content or "").lower()
         doc_lower = (doc_title or "").lower()
 
@@ -157,7 +280,7 @@ async def retrieve_passages(
         # Tier 1 Geographic Priority: Specific Locality Match (Town / Woreda)
         if target_town and (
             target_town in content_lower
-            or (target_town_am and target_town_am in chunk.content)
+            or (target_town_am and target_town_am in (chunk.content or ""))
             or (target_town_om and target_town_om in content_lower)
             or (target_woreda and target_woreda in content_lower)
             or target_town in doc_lower
@@ -166,7 +289,7 @@ async def retrieve_passages(
             locality_match_name = getattr(location, "name", target_town)
             geo_boost = 0.20
 
-        # Tier 2 Geographic Priority: Regional State / Zone / Local Research Center
+        # Tier 2 Geographic Priority: Regional State / Zone
         elif target_region and (
             target_region.lower() in content_lower
             or any(syn in content_lower for syn in regional_synonyms)
@@ -177,13 +300,13 @@ async def retrieve_passages(
             locality_match_name = target_region
             geo_boost = 0.12
 
-        # Tier 3 Geographic Priority: Agroecological Zone (Highland/Dega vs Lowland/Kolla)
+        # Tier 3 Geographic Priority: Agroecological Zone
         elif target_agroecology and any(kw in content_lower for kw in agro_keywords):
             geo_tier = "agroecological"
             locality_match_name = f"{target_agroecology} agroecological zone"
             geo_boost = 0.08
 
-        final_score = base_score + geo_boost
+        final_score = fused_score + geo_boost
 
         if final_score < threshold:
             continue
@@ -197,6 +320,8 @@ async def retrieve_passages(
                 content=chunk.content,
                 source_tier=doc_tier,
                 score=round(final_score, 4),
+                dense_score=round(dense_score, 4),
+                bm25_score=round(bm25_score, 4),
                 crop=chunk.crop,
                 topic=chunk.topic,
                 page_number=chunk.page_number,
@@ -206,15 +331,6 @@ async def retrieve_passages(
             )
         )
 
-    # Sort candidates by combined score descending (locality-boosted items rise to top)
+    # Final Sort by hybrid fused score
     candidate_passages.sort(key=lambda p: p.score, reverse=True)
-
-    passages = candidate_passages[:top_k]
-
-    locality_count = sum(1 for p in passages if p.geographic_tier == "locality")
-    regional_count = sum(1 for p in passages if p.geographic_tier == "regional")
-    logger.info(
-        f"Location-aware retrieval for '{query[:30]}...' -> {len(passages)} passages "
-        f"(locality={locality_count}, regional={regional_count}, target_region={target_region})"
-    )
-    return passages
+    return candidate_passages[:top_k]
