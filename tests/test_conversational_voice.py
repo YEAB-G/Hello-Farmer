@@ -243,28 +243,29 @@ async def test_rag_grounded_answer():
     )
 
     with patch("app.pipeline.match_agricultural_faq", return_value=None):
-        with patch("app.pipeline.search_agricultural_web", new_callable=AsyncMock) as mock_web:
-            mock_web.return_value = [
-                {
-                    "chunk_id": "web-1",
-                    "title": "EIAR Wheat Yellow Rust Advisory",
-                    "text": "በቢጫ ዝገት የተጠቃ ስንዴን በፕሮፒኮናዞል ፈንገስ ማጥፊያ በወቅቱ መርጨት ይመከራል።",
-                    "score": 0.95,
-                }
-            ]
-            with patch.object(LLMFallbackChain, "generate_response", new_callable=AsyncMock) as mock_chain:
-                mock_chain.return_value = mock_llm_answer
-                response = await process_utterance(
-                    audio_bytes=None,
-                    session=session,
-                    text_override="ስንዴዬ ላይ ቢጫ ዝገት ወጥቷል ምን ላድርግ?",
-                    synthesize_audio=False,
-                )
+        with patch("app.pipeline.retrieve_passages", new_callable=AsyncMock, return_value=[]):
+            with patch("app.pipeline.search_agricultural_web", new_callable=AsyncMock) as mock_web:
+                mock_web.return_value = [
+                    {
+                        "chunk_id": "web-1",
+                        "title": "EIAR Wheat Yellow Rust Advisory",
+                        "text": "በቢጫ ዝገት የተጠቃ ስንዴን በፕሮፒኮናዞል ፈንገስ ማጥፊያ በወቅቱ መርጨት ይመከራል።",
+                        "score": 0.95,
+                    }
+                ]
+                with patch.object(LLMFallbackChain, "generate_response", new_callable=AsyncMock) as mock_chain:
+                    mock_chain.return_value = mock_llm_answer
+                    response = await process_utterance(
+                        audio_bytes=None,
+                        session=session,
+                        text_override="ስንዴዬ ላይ ቢጫ ዝገት ወጥቷል ምን ላድርግ?",
+                        synthesize_audio=False,
+                    )
 
-                assert response.metadata.grounded is True
-                assert response.metadata.evidence_mode in ("rag_grounded", "location_aware_model_answer")
-                assert len(response.metadata.sources_used) > 0
-                assert "EIAR" in response.metadata.sources_used[0]["title"]
+                    assert response.metadata.grounded is True
+                    assert response.metadata.evidence_mode in ("rag_grounded", "location_aware_model_answer")
+                    assert len(response.metadata.sources_used) > 0
+                    assert "EIAR" in response.metadata.sources_used[0]["title"]
 
 
 # ==============================================================================

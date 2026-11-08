@@ -410,19 +410,25 @@ class CallStateMachine:
         audio_pcm = None
 
         while silence_count <= max_reminders and self.conn.is_active:
-            self.endpointer.energy_threshold = int(getattr(settings, "VAD_ENERGY_THRESHOLD", 110))
-            self.endpointer.silence_timeout_ms = int(getattr(settings, "SPEECH_SILENCE_TIMEOUT_MS", 2500))
+            self.endpointer.energy_threshold = int(getattr(settings, "VAD_ENERGY_THRESHOLD", 450))
+            self.endpointer.silence_timeout_ms = 350
+            self.endpointer.min_speech_ms = 180
+            self.endpointer.max_utterance_sec = 3.5
             self.endpointer.reset()
-            self.endpointer.initial_silence_timeout_sec = float(getattr(settings, "INITIAL_SILENCE_TIMEOUT_SECONDS", 12))
+            self.endpointer.initial_silence_timeout_sec = float(getattr(settings, "INITIAL_SILENCE_TIMEOUT_SECONDS", 10))
             audio_pcm = await self._collect_speech_frames()
 
             if not self.conn.is_active:
                 return ("TERMINATE", None)
 
             if audio_pcm and len(audio_pcm) >= 3200:
-                # Transcribe captured speech with location domain biasing
-                stt = get_stt_provider()
-                transcript = await stt.transcribe(audio_pcm, language=self.session_state.language, context="location")
+                # Transcribe captured speech with keepalive so Asterisk socket stays alive
+                self.conn.start_keepalive()
+                try:
+                    stt = get_stt_provider()
+                    transcript = await stt.transcribe(audio_pcm, language=self.session_state.language, context="location")
+                finally:
+                    self.conn.stop_keepalive()
                 spoken_text = transcript.text.strip()
                 print(f"📝 [LOCATION TRANSCRIPT] Spoken location: '{spoken_text}' (conf: {transcript.confidence})", flush=True)
                 log_telephony_event("SPEECH", "[LOCATION STT]", f"Location speech recognized: '{spoken_text}'", call_id=self.call_uuid, details={"transcript": spoken_text, "confidence": transcript.confidence})
@@ -447,11 +453,13 @@ class CallStateMachine:
             print("⚠️ [EMPTY STT] Proceeding with general guidance (location unknown).", flush=True)
             return ("SUCCESS", None)
 
-        # Save caller utterance to DB
-        await self._save_turn_messages(
-            caller_text=spoken_text,
-            assistant_text="Which area are you calling from?",
-            grounded=False,
+        # Save caller utterance to DB in background task so audio is not blocked
+        asyncio.create_task(
+            self._save_turn_messages(
+                caller_text=spoken_text,
+                assistant_text="Which area are you calling from?",
+                grounded=False,
+            )
         )
 
         # Check for goodbye/hangup intent early
@@ -472,7 +480,7 @@ class CallStateMachine:
 
             # Fully resolved
             self._apply_resolved_location(loc)
-            await self._update_call_location()
+            asyncio.create_task(self._update_call_location())
             print(
                 f"✅ [LOCATION RESOLVED] {loc.name} | Region: {loc.region} | "
                 f"Zone: {loc.zone} | Agroecology: {loc.agroecological_zone} (conf: {loc.confidence})",
@@ -497,7 +505,8 @@ class CallStateMachine:
                     from backend.app.farmer_context.extraction import extract_context_from_utterance
                 extracted = extract_context_from_utterance(spoken_text, language=self.session_state.language)
                 agri_keywords = ["ቅጠል", "ተባይ", "ማዳበሪያ", "ውሃ", "በሽታ", "ምርት", "ዘር", "ጤፍ", "ስንዴ", "በቆሎ", "problem", "crop", "leaf", "disease", "fertilizer", "yellow", "pest"]
-                if extracted.crop or extracted.symptoms or any(kw in spoken_text for kw in agri_keywords) or len(spoken_text.split()) >= 3:
+                has_agri_intent = bool(extracted.crop or extracted.symptoms or any(kw in spoken_text for kw in agri_keywords))
+                if has_agri_intent:
                     print(f"🌾 [EARLY QUESTION DETECTED] Caller already stated farming problem: '{spoken_text}'", flush=True)
                     return ("PROBLEM_ALREADY_SPOKEN", audio_pcm)
             except Exception as e:
@@ -521,8 +530,12 @@ class CallStateMachine:
         audio_pcm = await self._collect_speech_frames()
 
         if audio_pcm and len(audio_pcm) >= 3200:
-            stt = get_stt_provider()
-            transcript = await stt.transcribe(audio_pcm, language=self.session_state.language)
+            self.conn.start_keepalive()
+            try:
+                stt = get_stt_provider()
+                transcript = await stt.transcribe(audio_pcm, language=self.session_state.language)
+            finally:
+                self.conn.stop_keepalive()
             region_answer = transcript.text.strip()
             print(f"📝 [REGION CLARIFICATION] Caller replied: '{region_answer}'", flush=True)
 
@@ -566,8 +579,9 @@ class CallStateMachine:
 
     async def _state_listen(self) -> Optional[bytes]:
         """State: Listen for caller utterance with VAD."""
-        self.endpointer.energy_threshold = int(getattr(settings, "VAD_ENERGY_THRESHOLD", 110))
-        self.endpointer.silence_timeout_ms = int(getattr(settings, "SPEECH_SILENCE_TIMEOUT_MS", 2500))
+        self.endpointer.energy_threshold = int(getattr(settings, "VAD_ENERGY_THRESHOLD", 450))
+        self.endpointer.silence_timeout_ms = 900
+        self.endpointer.max_utterance_sec = 8.0
         turn_num = self.session_state.turn_count + 1
         print(f"\n👂 [STATE: LISTEN] Turn #{turn_num} | Listening for caller voice (Threshold: {self.endpointer.energy_threshold})...", flush=True)
         log_telephony_event("SPEECH", "[LISTENING]", f"Turn #{turn_num}: Listening for caller voice (VAD threshold: {self.endpointer.energy_threshold})", call_id=self.call_uuid)
@@ -583,7 +597,8 @@ class CallStateMachine:
             max_reminders = getattr(settings, "MAX_SILENCE_REMINDERS", 2)
             print(f"⚠️ [SILENCE] No speech detected (consecutive silence: {self.session_state.consecutive_silence_count}/{max_reminders})", flush=True)
             if self.session_state.consecutive_silence_count < max_reminders:
-                await self._play_prompt("repeat_prompt", self.session_state.language)
+                # Play natural listening reminder cue ("እየሰማሁዎት ነው፣ እባክዎ ጥያቄዎን ይናገሩ")
+                await self._play_prompt("listening_reminder", self.session_state.language)
             return None
 
         return speech_pcm
@@ -598,20 +613,37 @@ class CallStateMachine:
         """
         print(f"🧠 [STATE: RETRIEVAL & GENERATION] Processing agricultural query ({len(audio_pcm)} bytes)...", flush=True)
         log_telephony_event("AI", "[RAG RETRIEVAL]", f"Running agricultural knowledge retrieval ({len(audio_pcm)} bytes)...", call_id=self.call_uuid)
-        # Immediately acknowledge caller query so they know the system is searching and RTP stream stays alive
-        await self._play_prompt("one_moment", self.session_state.language)
-        await asyncio.sleep(0.05)
 
-        # Keep AudioSocket connection alive with 20ms silence frames so Asterisk does not drop during RAG/LLM
-        self.conn.start_keepalive()
-        try:
-            start_t = time.perf_counter()
-            response = await process_utterance(
+        start_t = time.perf_counter()
+
+        # Launch pipeline processing task concurrently in background
+        proc_task = asyncio.create_task(
+            process_utterance(
                 audio_bytes=audio_pcm,
                 session=self.session_state,
                 text_override=None,
                 synthesize_audio=True,
             )
+        )
+
+        # 1. Immediately acknowledge caller query so they know the system is actively searching
+        await self._play_prompt("one_moment", self.session_state.language)
+
+        # Start continuous keepalive immediately so Asterisk AudioSocket channel NEVER experiences a frame gap
+        self.conn.start_keepalive()
+
+        # 2. Progressive Holding Cue: If processing takes longer than the first cue, play reassurance prompt
+        # so there is never dead air or silence on the line
+        if not proc_task.done():
+            done, _ = await asyncio.wait([proc_task], timeout=1.8)
+            if not done and self.conn.is_active:
+                self.conn.stop_keepalive()
+                print("🔄 [PROGRESSIVE HOLDING CUE] AI reasoning in progress... Playing reassurance holding prompt.", flush=True)
+                await self._play_prompt("still_checking", self.session_state.language)
+                self.conn.start_keepalive()
+
+        try:
+            response = await proc_task
         finally:
             self.conn.stop_keepalive()
 
@@ -634,10 +666,13 @@ class CallStateMachine:
         )
         log_telephony_event("AI", "[USER QUESTION]", f"Caller: '{caller_txt}'", call_id=self.call_uuid, details={"transcript": caller_txt})
         log_telephony_event("AI", "[AI ANSWER]", f"Assistant: '{response.text[:100]}...' (Confidence: {response.metadata.confidence:.2f}, Latency: {duration_ms:.0f}ms)", call_id=self.call_uuid, details={"answer": response.text})
-        await self._save_turn_messages(
-            caller_text=caller_txt,
-            assistant_text=response.text,
-            grounded=getattr(response.metadata, "grounded", True),
+        # Save turn messages to DB in background task so TTS audio playback starts immediately
+        asyncio.create_task(
+            self._save_turn_messages(
+                caller_text=caller_txt,
+                assistant_text=response.text,
+                grounded=getattr(response.metadata, "grounded", True),
+            )
         )
 
         # Check for goodbye

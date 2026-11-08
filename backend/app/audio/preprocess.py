@@ -35,8 +35,8 @@ def apply_preemphasis(signal: np.ndarray, alpha: float = 0.97) -> np.ndarray:
 def apply_automatic_gain_control(
     signal: np.ndarray,
     target_rms: float = 0.08,
-    max_gain: float = 8.0,
-    min_gain: float = 0.2,
+    max_gain: float = 6.0,
+    min_gain: float = 0.05,
 ) -> np.ndarray:
     """Normalize speech loudness to standard target RMS energy level without clipping.
 
@@ -98,10 +98,13 @@ def preprocess_speech_for_stt(
     if len(samples) == 0:
         return b""
 
-    # 2. Resample to 16 kHz if necessary
+    # 2. Clean polyphase FIR resampling (zero Gibbs ringing artifacts)
     if sr != 16000:
-        target_len = int(len(samples) * 16000 / sr)
-        samples = scipy.signal.resample(samples, target_len).astype(np.float32)
+        if sr == 8000:
+            samples = scipy.signal.resample_poly(samples, 2, 1).astype(np.float32)
+        else:
+            target_len = int(len(samples) * 16000 / sr)
+            samples = scipy.signal.resample(samples, target_len).astype(np.float32)
         sr = 16000
 
     # 3. Apply Acoustic Normalization: Gentle AGC (preserving full harmonic spectrum)

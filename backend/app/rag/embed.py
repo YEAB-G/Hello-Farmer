@@ -42,15 +42,14 @@ class GeminiEmbeddingProvider(BaseEmbeddingProvider):
         self._dim = 768  # vector dimension
 
 
-        self._configured = False
+        self._client = None
         self._quota_exhausted = False
         if self.api_key and self.api_key != "your_gemini_api_key_here":
             try:
-                import google.generativeai as genai
-                genai.configure(api_key=self.api_key)
-                self._configured = True
+                from google import genai
+                self._client = genai.Client(api_key=self.api_key)
             except Exception as e:
-                logger.warning(f"Could not configure Gemini embeddings: {e}")
+                logger.warning(f"Could not configure modern Gemini client: {e}")
 
     @property
     def dimension(self) -> int:
@@ -60,35 +59,32 @@ class GeminiEmbeddingProvider(BaseEmbeddingProvider):
         if not texts:
             return []
 
-        if not self._configured or self._quota_exhausted:
+        if not self._client or self._quota_exhausted:
             return [self._offline_hash_embedding(t) for t in texts]
 
         try:
-            import google.generativeai as genai
             vectors = []
-            batch_size = 50
+            batch_size = 20
+            clean_model = self.model_name.replace("models/", "")
             for i in range(0, len(texts), batch_size):
                 if self._quota_exhausted:
                     vectors.extend([self._offline_hash_embedding(t) for t in texts[i:i + batch_size]])
                     continue
                 batch = texts[i:i + batch_size]
                 try:
-                    result = genai.embed_content(
-                        model=self.model_name,
-                        content=batch,
-                        task_type="retrieval_document",
-                        output_dimensionality=self._dim,
+                    result = self._client.models.embed_content(
+                        model=clean_model,
+                        contents=batch,
+                        config={"output_dimensionality": self._dim},
                     )
-                    res_emb = result.get("embedding", [])
-                    if res_emb and isinstance(res_emb[0], list):
-                        vectors.extend(res_emb)
-                    elif res_emb:
-                        vectors.append(res_emb)
+                    if hasattr(result, "embeddings") and result.embeddings:
+                        for emb in result.embeddings:
+                            vectors.append(list(emb.values))
                     else:
                         vectors.extend([self._offline_hash_embedding(t) for t in batch])
                 except Exception as batch_err:
                     err_msg = str(batch_err)
-                    if "429" in err_msg or "quota" in err_msg.lower():
+                    if "429" in err_msg or "quota" in err_msg.lower() or "RESOURCE_EXHAUSTED" in err_msg:
                         logger.warning("Gemini embedding quota exceeded (429). Activating fast fallback projection for all remaining chunks.")
                         self._quota_exhausted = True
                     else:

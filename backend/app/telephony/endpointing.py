@@ -4,11 +4,12 @@ Processes 20ms frames (160 samples / 320 bytes of 8 kHz 16-bit PCM).
 Uses audio-time frame tracking (20ms per frame) for immune network jitter detection,
 pre-roll pad for preserving onset consonants, and clean silence trimming.
 """
-import audioop
 import collections
 import enum
 import time
 from typing import Optional
+
+import numpy as np
 
 
 class EndpointState(enum.Enum):
@@ -20,17 +21,21 @@ class EndpointState(enum.Enum):
 
 
 class VADEndpointer:
-    """Accumulates incoming 8 kHz 16-bit mono PCM frames and detects utterance boundaries."""
+    """Accumulates incoming 8 kHz 16-bit mono PCM frames and detects utterance boundaries.
+
+    Uses zero-mean AC RMS energy to eliminate DC bias from Windows softphones,
+    retains a 400ms pre-roll pad for consonant preservation, and cleanly endpoints speech.
+    """
 
     FRAME_MS = 20  # 320 bytes = 160 samples at 8kHz 16-bit PCM = 20ms
 
     def __init__(
         self,
-        energy_threshold: int = 110,
-        min_speech_ms: int = 300,
-        silence_timeout_ms: int = 2500,
-        initial_silence_timeout_sec: float = 14.0,
-        max_utterance_sec: float = 20.0,
+        energy_threshold: int = 250,
+        min_speech_ms: int = 260,
+        silence_timeout_ms: int = 750,
+        initial_silence_timeout_sec: float = 12.0,
+        max_utterance_sec: float = 8.0,
     ):
         self.energy_threshold = energy_threshold
         self.min_speech_ms = min_speech_ms
@@ -68,12 +73,14 @@ class VADEndpointer:
         if len(frame_bytes) < 4:
             return self.state
 
-        # Compute RMS energy of 16-bit mono PCM
-        rms = audioop.rms(frame_bytes, 2)
-        is_voiced = rms >= self.energy_threshold
+        # Compute standard RMS energy of 16-bit mono PCM
+        samples = np.frombuffer(frame_bytes, dtype=np.int16).astype(np.float32)
+        rms = int(np.sqrt(np.mean(samples**2)))
         self.last_rms = rms
-        self.last_is_voiced = is_voiced
         self.total_audio_ms += self.FRAME_MS
+
+        is_voiced = rms >= self.energy_threshold
+        self.last_is_voiced = is_voiced
 
         if self.state == EndpointState.WAITING_FOR_SPEECH:
             if is_voiced:
@@ -87,7 +94,6 @@ class VADEndpointer:
                 self.speech_frames.append(frame_bytes)
             else:
                 self.pre_roll.append(frame_bytes)
-                # Check initial silence timeout (strictly wall-clock elapsed time so buffered frames never trigger premature timeout)
                 if now - self.start_time >= self.initial_silence_timeout_sec:
                     self.state = EndpointState.INITIAL_SILENCE_TIMEOUT
                     return self.state
@@ -95,7 +101,7 @@ class VADEndpointer:
         elif self.state == EndpointState.SPEECH_IN_PROGRESS:
             self.speech_frames.append(frame_bytes)
 
-            # Check max utterance limit (15s)
+            # Check max utterance limit (prevents endless recording)
             if self.total_audio_ms >= int(self.max_utterance_sec * 1000):
                 self.state = EndpointState.MAX_DURATION_EXCEEDED
                 return self.state
@@ -110,7 +116,7 @@ class VADEndpointer:
                 self.silence_ms += self.FRAME_MS
                 elapsed_silence_ms = int((now - self.silence_start_time) * 1000)
                 effective_silence_ms = max(self.silence_ms, elapsed_silence_ms)
-                # If caller was speaking and is now silent for silence_timeout_ms (e.g. 800ms)
+
                 if (
                     effective_silence_ms >= self.silence_timeout_ms
                     and self.voiced_ms >= self.min_speech_ms

@@ -2353,7 +2353,7 @@ export default function HelloFarmerApp() {
                     <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '0.35rem' }}>
                       <span style={{ color: '#94a3b8' }}>SIP Server:</span>
                       <span style={{ fontWeight: 600, fontFamily: 'monospace' }}>
-                        {voiceAgentStatus?.sip_server || '192.168.220.14:5060'}
+                        {voiceAgentStatus?.sip_server || '127.0.0.1:5060'}
                       </span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '0.35rem' }}>

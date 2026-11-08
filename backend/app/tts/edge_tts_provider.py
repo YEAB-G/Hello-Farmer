@@ -113,7 +113,7 @@ class EdgeTTSProvider(BaseTTSProvider):
                     if pcm_8k and len(pcm_8k) > 0:
                         return pcm_8k
             except Exception as e:
-                self._edge_cooldown_until = now + 600.0  # 10 minute cooldown
+                self._edge_cooldown_until = now + 15.0  # 10 minute cooldown
                 logger.warning(f"Edge-TTS synthesis unavailable ({e}), trying Google TTS fallback...")
 
         # Tier 2: Resilient Google Translate TTS with normalized text

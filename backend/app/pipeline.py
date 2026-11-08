@@ -157,7 +157,8 @@ GOODBYE_KEYWORDS = {
         "ጨርሻለሁ", "አመሰግናለሁ", "እናመሰግናለን", "አመሰግናለሁ ይበቃል", "እናመሰግናለን ይበቃል",
         "የለም", "የለም በቃኝ", "የለም አመሰግናለሁ", "ምንም የለም", "የለም አመሰግናለው",
         "በቃ እናመሰግናለን", "ደህና ዋሉ", "ደህና እደሩ", "ምንም ጥያቄ የለኝም", "ጥያቄ የለኝም",
-        "ሌላ ጥያቄ የለኝም", "ምንም ሌላ ጥያቄ የለኝም", "ጥያቄ የለም", "ምንም የለኝም", "የለኝም"
+        "ሌላ ጥያቄ የለኝም", "ምንም ሌላ ጥያቄ የለኝም", "ጥያቄ የለም", "ምንም የለኝም", "የለኝም",
+        "ቸሻለሁ", "ሻሻለው", "ቸቻሎ", "ጨርሻለው", "ጨረስኩ", "ጨርሰናል", "ተጠናቋል"
     ],
     "om": [
         "nagaatti", "ga'aadha", "ammaaf ga'aadha", "galatoomi", "xumureera", "nagaan bulaa",
@@ -167,7 +168,8 @@ GOODBYE_KEYWORDS = {
         "goodbye", "bye", "that's all", "that is all", "thank you that's enough", "done",
         "no thank you", "no thanks", "nothing else", "i don't have a question", "i dont have a question",
         "no question", "no questions", "i have no question", "i have no questions", "no more questions",
-        "nothing more", "i'm done", "im done", "that's it", "thats all"
+        "nothing more", "i'm done", "im done", "that's it", "thats all",
+        "i have finished", "i finished", "finished", "im finished", "i'm finished", "have finished", "finish", "finished now"
     ],
     "ti": [
         "ደሓን ኩኑ", "ደሓን ዋዓሉ", "የቐንየለይ", "ይኣክል", "ሕቶ የብለይን", "ካልእ ሕቶ የብለይን", "የለን"
@@ -186,6 +188,8 @@ GREETING_KEYWORDS = {
 
 def is_goodbye_intent(text: str, language: str = "am") -> bool:
     lower = text.lower().strip()
+    if any(k in lower for k in ("finish", "finished", "done", "that's all", "thats all", "no more")):
+        return True
     kw_list = GOODBYE_KEYWORDS.get(language, []) + GOODBYE_KEYWORDS["en"]
     if any(k in lower for k in kw_list):
         return True
@@ -386,9 +390,27 @@ async def process_utterance(
             loc_match = resolve_location(session.location_region)
 
         if not loc_match:
-            # Fallback to major central farming hub (Adama) so we never fail to answer
-            loc_match = resolve_location("Adama")
-            is_default_location = True
+            ask_loc_msg = (
+                "የአየር ሁኔታ መረጃ ለማግኘት እባክዎ አካባቢዎን ወይም ወረዳዎን ይንገሩኝ?"
+                if session.language == "am"
+                else "Haala qilleensaa baruuf maaloo naannoo yookiin aanaa keessan natti himaa?"
+            )
+            audio_out = b""
+            if synthesize_audio:
+                tts = get_tts_provider()
+                audio_out = await tts.synthesize(ask_loc_msg, language=session.language)
+            return Response(
+                audio=audio_out,
+                text=ask_loc_msg,
+                metadata=ResponseMetadata(
+                    grounded=True,
+                    topic="weather_location_request",
+                    confidence=0.95,
+                    latency_ms={"total": round((time.time() - t0) * 1000, 1)},
+                    answer_en_gloss="Please specify your woreda or nearby area to get weather forecast.",
+                    user_transcript=user_text,
+                ),
+            )
 
         # Update confirmed location in session
         if not is_default_location and loc_match:

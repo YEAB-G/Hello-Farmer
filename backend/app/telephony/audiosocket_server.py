@@ -57,6 +57,16 @@ class AudioSocketConnection:
                     break
                 self.writer.write(packet)
                 await self.writer.drain()
+
+                # Continuously drain incoming audio frames from Asterisk so TCP window never fills up
+                try:
+                    drain_chunk = await asyncio.wait_for(self.reader.read(4096), timeout=0.001)
+                    if not drain_chunk:
+                        self.is_active = False
+                        break
+                except asyncio.TimeoutError:
+                    pass
+
                 await asyncio.sleep(0.02)
             except Exception:
                 break
@@ -174,33 +184,32 @@ class AudioSocketConnection:
                 if not self.is_active or self.writer.is_closing():
                     return False
 
-                # Full-duplex barge-in detection: inspect incoming frames while speaking
-                if is_barge_in_active:
-                    while True:
-                        try:
-                            header = await asyncio.wait_for(self.reader.readexactly(3), timeout=0.001)
-                            msg_type, length = struct.unpack("!BH", header)
-                            payload = await self.reader.readexactly(length) if length > 0 else b""
-                            if msg_type in (TYPE_AUDIO, 0x10, 0x11, 0x12) and len(payload) >= 4:
-                                rms = audioop.rms(payload, 2)
-                                if rms >= threshold:
-                                    consecutive_speech_frames += 1
-                                    self.barge_in_buffer.append(payload)
-                                    if consecutive_speech_frames >= 2:
-                                        print(
-                                            f"🛑 [BARGE-IN DETECTED ✋] Caller spoke during playback (RMS {rms} >= {threshold})! Halting audio.",
-                                            flush=True,
-                                        )
-                                        return False
-                                else:
-                                    consecutive_speech_frames = 0
-                            elif msg_type == TYPE_HANGUP:
-                                self.is_active = False
-                                return False
-                        except asyncio.TimeoutError:
-                            break
-                        except Exception:
-                            break
+                # Full-duplex frame consumption: actively drain incoming frames so Asterisk TCP buffer NEVER overflows
+                while True:
+                    try:
+                        header = await asyncio.wait_for(self.reader.readexactly(3), timeout=0.001)
+                        msg_type, length = struct.unpack("!BH", header)
+                        payload = await self.reader.readexactly(length) if length > 0 else b""
+                        if msg_type == TYPE_HANGUP:
+                            self.is_active = False
+                            return False
+                        if is_barge_in_active and msg_type in (TYPE_AUDIO, 0x10, 0x11, 0x12) and len(payload) >= 4:
+                            rms = audioop.rms(payload, 2)
+                            if rms >= threshold:
+                                consecutive_speech_frames += 1
+                                self.barge_in_buffer.append(payload)
+                                if consecutive_speech_frames >= 2:
+                                    print(
+                                        f"🛑 [BARGE-IN DETECTED ✋] Caller spoke during playback (RMS {rms} >= {threshold})! Halting audio.",
+                                        flush=True,
+                                    )
+                                    return False
+                            else:
+                                consecutive_speech_frames = 0
+                    except asyncio.TimeoutError:
+                        break
+                    except Exception:
+                        break
 
                 chunk = pcm_data[i:i + chunk_size]
                 header = struct.pack("!BH", TYPE_AUDIO, len(chunk))

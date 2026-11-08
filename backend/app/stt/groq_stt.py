@@ -55,8 +55,16 @@ class GroqSTTProvider(BaseSTTProvider):
             unique_chars = set(clean)
             if len(clean) >= 6 and len(unique_chars) <= 2:
                 return True
+            # Repeated word looping (e.g. የምዹትት የምዹት)
+            tokens = text.strip().split()
+            if len(tokens) >= 2 and tokens[-1] == tokens[-2]:
+                return True
+            # Archaic characters rarely present in normal speech produced by Whisper hallucination
+            archaic_chars = {"ጵ", "ጷ", "ዹ", "ጰ", "ጱ", "ጲ", "ጳ", "ጴ", "ፕ", "ፖ"}
+            if any(ch in clean for ch in archaic_chars):
+                return True
         # Common English Whisper silence hallucinations
-        english_hallucinations = ["thank you for watching", "subtitles by", "amara.org", "you"]
+        english_hallucinations = ["thank you for watching", "subtitles by", "amara.org", "you", "thanks for watching"]
         if text.strip().lower() in english_hallucinations:
             return True
         return False

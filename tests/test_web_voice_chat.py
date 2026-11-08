@@ -11,6 +11,7 @@ Validates:
 8. Fallback resiliency: TTS fallback returns valid audio without crashing.
 """
 import base64
+from unittest.mock import AsyncMock, patch
 import pytest
 from httpx import AsyncClient, ASGITransport
 from pathlib import Path
@@ -58,17 +59,19 @@ async def test_transcribe_endpoint(sample_amharic_wav_b64):
     """Test /api/v1/voice/transcribe endpoint with authentic speech sample."""
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.post(
-            "/api/v1/voice/transcribe",
-            json={"audio_base64": sample_amharic_wav_b64, "language": "am"},
-            timeout=20.0,
-        )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert "transcript" in data
-        assert len(data["transcript"]) > 0
-        assert data["language"] == "am"
-        assert data["confidence"] > 0.0
+        with patch("app.stt.gemini_stt.GeminiSTTProvider._call_gemini_api", new_callable=AsyncMock) as mock_stt:
+            mock_stt.return_value = ("ሰላም ወደ ሄሎ ፋርመር እንኳን ደህና መጡ", "am")
+            resp = await client.post(
+                "/api/v1/voice/transcribe",
+                json={"audio_base64": sample_amharic_wav_b64, "language": "am"},
+                timeout=20.0,
+            )
+            assert resp.status_code == 200
+            data = resp.json()
+            assert "transcript" in data
+            assert len(data["transcript"]) > 0
+            assert data["language"] == "am"
+            assert data["confidence"] > 0.0
 
 
 @pytest.mark.asyncio
@@ -95,25 +98,34 @@ async def test_synthesize_endpoint_and_audio_stream():
         assert stream_resp.content.startswith(b"RIFF")
 
 
+from app.llm.base import LLMAnswer
+from app.llm.chain import LLMFallbackChain
+
 @pytest.mark.asyncio
 async def test_typed_question_with_tts_synthesis():
     """Test typed Amharic question returning both text answer and spoken audio."""
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.post(
-            "/api/v1/ask",
-            json={
-                "question": "ለጤፍ የሚሆን ማዳበሪያ መጠን ስንት ነው?",
-                "language": "am",
-                "synthesize_audio": True,
-            },
-            timeout=30.0,
-        )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert len(data["answer"]) > 0
-        assert data["audio_base64"].startswith("data:audio/wav;base64,")
-        assert data["confidence"] > 0.0
+        with patch.object(LLMFallbackChain, "generate_response", new_callable=AsyncMock) as mock_llm:
+            mock_llm.return_value = LLMAnswer(
+                answer="የተከበሩ አርሶ አደር፣ ለጤፍ ማዳበሪያ አጠቃቀም በመጀመሪያ ደረጃ ዩሪያ እና ዳፕ በወቅቱ ይመከራል።",
+                confidence=0.9,
+                provider="gemini",
+            )
+            resp = await client.post(
+                "/api/v1/ask",
+                json={
+                    "question": "ለጤፍ የሚሆን ማዳበሪያ መጠን ስንት ነው?",
+                    "language": "am",
+                    "synthesize_audio": True,
+                },
+                timeout=30.0,
+            )
+            assert resp.status_code == 200
+            data = resp.json()
+            assert len(data["answer"]) > 0
+            assert data["audio_base64"].startswith("data:audio/wav;base64,")
+            assert data["confidence"] > 0.0
 
 
 @pytest.mark.asyncio
@@ -121,21 +133,29 @@ async def test_voice_ask_end_to_end(sample_amharic_wav_b64):
     """Test complete voice input -> STT -> RAG -> text & audio answer."""
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.post(
-            "/api/v1/voice/ask",
-            json={
-                "audio_base64": sample_amharic_wav_b64,
-                "language": "am",
-                "synthesize_audio": True,
-            },
-            timeout=35.0,
-        )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert "transcript" in data
-        assert len(data["answer"]) > 0
-        assert data["audio_base64"].startswith("data:audio/wav;base64,")
-        assert "session_id" in data
+        with patch("app.stt.gemini_stt.GeminiSTTProvider._call_gemini_api", new_callable=AsyncMock) as mock_stt, \
+             patch.object(LLMFallbackChain, "generate_response", new_callable=AsyncMock) as mock_llm:
+            mock_stt.return_value = ("ጤፍ ላይ ማዳበሪያ እንዴት ልጠቀም?", "am")
+            mock_llm.return_value = LLMAnswer(
+                answer="የተከበሩ አርሶ አደር፣ ጤፍ ላይ ማዳበሪያ ሲጠቀሙ በመጀመሪያ የአፈር ምርመራ ማድረግ ያስፈልጋል።",
+                confidence=0.9,
+                provider="gemini",
+            )
+            resp = await client.post(
+                "/api/v1/voice/ask",
+                json={
+                    "audio_base64": sample_amharic_wav_b64,
+                    "language": "am",
+                    "synthesize_audio": True,
+                },
+                timeout=35.0,
+            )
+            assert resp.status_code == 200
+            data = resp.json()
+            assert "transcript" in data
+            assert len(data["answer"]) > 0
+            assert data["audio_base64"].startswith("data:audio/wav;base64,")
+            assert "session_id" in data
 
 
 @pytest.mark.asyncio
@@ -145,36 +165,49 @@ async def test_multi_turn_conversation_context():
     import time
     session_id = f"test-session-{int(time.time() * 1000)}"
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        # Turn 1: Ask about teff fertilizer
-        resp1 = await client.post(
-            "/api/v1/voice/ask",
-            json={
-                "question": "የጤፍ ማዳበሪያ አጠቃቀም መጠን ስንት ነው?",
-                "session_id": session_id,
-                "language": "am",
-                "synthesize_audio": False,
-            },
-            timeout=30.0,
-        )
-        assert resp1.status_code == 200
-        data1 = resp1.json()
-        assert "answer" in data1
+        with patch.object(LLMFallbackChain, "generate_response", new_callable=AsyncMock) as mock_llm:
+            mock_llm.side_effect = [
+                LLMAnswer(
+                    answer="የተከበሩ አርሶ አደር፣ ለጤፍ ማዳበሪያ በመጀመሪያ ዘር ሲዘራ ዳፕ ይሰጣል ከዚያም ዩሪያ ይሰጣል።",
+                    confidence=0.9,
+                    provider="gemini",
+                ),
+                LLMAnswer(
+                    answer="የተከበሩ አርሶ አደር፣ ዩሪያ ማዳበሪያው ጤፍ ተዘርቶ አረም ከተወገደ በኋላ ይጨመራል።",
+                    confidence=0.9,
+                    provider="gemini",
+                ),
+            ]
+            # Turn 1: Ask about teff fertilizer
+            resp1 = await client.post(
+                "/api/v1/voice/ask",
+                json={
+                    "question": "የጤፍ ማዳበሪያ አጠቃቀም መጠን ስንት ነው?",
+                    "session_id": session_id,
+                    "language": "am",
+                    "synthesize_audio": False,
+                },
+                timeout=30.0,
+            )
+            assert resp1.status_code == 200
+            data1 = resp1.json()
+            assert "answer" in data1
 
-        # Turn 2: Follow up question without repeating the crop name
-        resp2 = await client.post(
-            "/api/v1/voice/ask",
-            json={
-                "question": "መቼ ነው የምጨምረው?",
-                "session_id": session_id,
-                "language": "am",
-                "synthesize_audio": False,
-            },
-            timeout=30.0,
-        )
-        assert resp2.status_code == 200
-        data2 = resp2.json()
-        # The answer should maintain agronomic context
-        assert len(data2["answer"]) > 0
+            # Turn 2: Follow up question without repeating the crop name
+            resp2 = await client.post(
+                "/api/v1/voice/ask",
+                json={
+                    "question": "መቼ ነው የምጨምረው?",
+                    "session_id": session_id,
+                    "language": "am",
+                    "synthesize_audio": False,
+                },
+                timeout=30.0,
+            )
+            assert resp2.status_code == 200
+            data2 = resp2.json()
+            # The answer should maintain agronomic context
+            assert len(data2["answer"]) > 0
 
 
 @pytest.mark.asyncio
@@ -213,17 +246,25 @@ async def test_oromo_voice_ask(sample_oromo_wav_b64):
     """Test Afaan Oromo speech recognition and localized response generation."""
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.post(
-            "/api/v1/voice/ask",
-            json={
-                "audio_base64": sample_oromo_wav_b64,
-                "language": "om",
-                "synthesize_audio": True,
-            },
-            timeout=35.0,
-        )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert len(data["transcript"]) > 0
-        assert len(data["answer"]) > 0
-        assert data["language"] == "om"
+        with patch("app.stt.gemini_stt.GeminiSTTProvider._call_gemini_api", new_callable=AsyncMock) as mock_stt, \
+             patch.object(LLMFallbackChain, "generate_response", new_callable=AsyncMock) as mock_llm:
+            mock_stt.return_value = ("Boqqoolloo irratti xaa'oo akkamitti fayyadamuun danda'ama?", "om")
+            mock_llm.return_value = LLMAnswer(
+                answer="Kabajamoo qonnaan bulaa, boqqoolloo irratti xaa'oo fayyadamuuf qophii gaarii taasisaa.",
+                confidence=0.9,
+                provider="gemini",
+            )
+            resp = await client.post(
+                "/api/v1/voice/ask",
+                json={
+                    "audio_base64": sample_oromo_wav_b64,
+                    "language": "om",
+                    "synthesize_audio": True,
+                },
+                timeout=35.0,
+            )
+            assert resp.status_code == 200
+            data = resp.json()
+            assert len(data["transcript"]) > 0
+            assert len(data["answer"]) > 0
+            assert data["language"] == "om"

@@ -91,11 +91,14 @@ class GeminiSTTProvider(BaseSTTProvider):
             logger.error("Could not configure any Google Gemini client for STT: %s", e)
 
     def _get_fallback_provider(self) -> Optional[BaseSTTProvider]:
-        """Lazy load configured fallback STT provider (Groq or local Whisper)."""
+        """Lazy load configured fallback STT provider (or None if disabled)."""
         if self._fallback_provider is not None:
             return self._fallback_provider
 
-        fallback_type = getattr(settings, "STT_FALLBACK_PROVIDER", "groq").lower()
+        fallback_type = getattr(settings, "STT_FALLBACK_PROVIDER", "none").lower()
+        if fallback_type in ("none", "null", "false", "disabled", "gemini"):
+            return None
+
         try:
             if fallback_type == "groq" and getattr(settings, "GROQ_API_KEY", None):
                 try:
@@ -103,7 +106,7 @@ class GeminiSTTProvider(BaseSTTProvider):
                 except ImportError:
                     from backend.app.stt.groq_stt import GroqSTTProvider
                 self._fallback_provider = GroqSTTProvider()
-            else:
+            elif fallback_type == "whisper_local":
                 try:
                     from app.stt.whisper_local import WhisperLocalSTTProvider
                 except ImportError:
@@ -155,10 +158,16 @@ class GeminiSTTProvider(BaseSTTProvider):
 
         return wav_16k, duration_sec, rms_energy
 
-    async def transcribe(self, wav_path_or_bytes: str | bytes, language: str = "am") -> Transcript:
+    async def transcribe(
+        self,
+        wav_path_or_bytes: str | bytes,
+        language: str = "am",
+        **kwargs,
+    ) -> Transcript:
         """Transcribe farmer speech using Gemini API with bounded fallback."""
         start_time = time.perf_counter()
         raw_lang = (language or "am").lower().strip()
+        context = kwargs.get("context")
         if raw_lang in ("om", "oromo", "afaan_oromo"):
             lang_code = "om"
             lang_name = "Afaan Oromo (using Latin Qubee script)"
@@ -195,12 +204,32 @@ class GeminiSTTProvider(BaseSTTProvider):
                 "and transcribe the speech verbatim in that language's native script. "
                 "Do NOT translate into English. Return ONLY the transcribed text."
             )
+        elif context == "location":
+            lang_code = "am" if raw_lang not in ("om", "ti", "so", "en") else raw_lang
+            instruction = (
+                "You are an acoustic Speech-to-Text transcriber for an Ethiopian phone hotline. "
+                "The caller is answering what city, woreda, or zone they are calling from (e.g. ባህር ዳር, አዳማ, ደብረ ብርሃን, ሀዋሳ, ጎንደር, ጅማ, መቀሌ, ባሌ, ወዘተ). "
+                "Transcribe the EXACT location name spoken. Use Ge'ez Fidel script (or Latin if spoken in English/Oromo). "
+                "CRITICAL RULES:\n"
+                "- Transcribe what you hear phonetically verbatim. Do NOT guess or substitute another city from memory.\n"
+                "- Return ONLY the transcribed location name."
+            )
         else:
             lang_code = "am"
             lang_name = "Amharic (አማርኛ using Ethiopic Fidel script)"
+            biasing = get_stt_biasing_prompt("am", context=context)
             instruction = (
-                f"Transcribe this speech accurately in authentic {lang_name}. "
-                "Do NOT translate into English or add commentary. Return ONLY the transcription text verbatim."
+                "You are an acoustic Speech-to-Text transcriber for a phone call hotline. "
+                "Transcribe the spoken audio verbatim without translating or altering the meaning. "
+                "If the caller speaks Amharic, transcribe into authentic Amharic Fidel script. "
+                "If the caller speaks English (e.g. 'I have finished', 'I am done', 'Thank you', 'Goodbye'), transcribe verbatim in English. "
+                f"Vocabulary biasing context: {biasing}, ጨርሻለሁ, ይበቃል, አመሰግናለሁ, በቃኝ, የለም, I have finished, I am done, that is all. "
+                "CRITICAL RULES:\n"
+                "- Transcribe ONLY the exact spoken words verbatim.\n"
+                "- NEVER output 'ሄሎ' or 'ሰላም' unless the caller explicitly said 'hello' or 'ሰላም'.\n"
+                "- If the caller speaks 'ጨርሻለሁ', transcribe it as 'ጨርሻለሁ'.\n"
+                "- If the caller speaks 'I have finished', transcribe it as 'I have finished'.\n"
+                "- If the audio is silence or background noise, output an empty string."
             )
 
         # Step 1: Preprocess and detect silence
@@ -235,7 +264,7 @@ class GeminiSTTProvider(BaseSTTProvider):
             )
 
         # Step 4: Execute Gemini STT call with bounded retries and exponential backoff
-        max_attempts = 2
+        max_attempts = 3
         last_error = None
 
         for attempt in range(1, max_attempts + 1):
@@ -275,17 +304,19 @@ class GeminiSTTProvider(BaseSTTProvider):
                 )
 
             except Exception as err:
-                last_error = str(err)
+                is_timeout = isinstance(err, (asyncio.TimeoutError, TimeoutError))
+                last_error = "TimeoutError: Request exceeded deadline" if is_timeout else str(err)
                 err_lower = last_error.lower()
                 is_rate_limit = "429" in last_error or "quota" in err_lower or "resource_exhausted" in err_lower
-                is_transient = "503" in last_error or "unavailable" in err_lower or "timeout" in err_lower
+                is_transient = is_timeout or "503" in last_error or "unavailable" in err_lower or "timeout" in err_lower
 
                 logger.warning(
-                    "Gemini STT attempt %d failed: %s (rate_limit=%s, transient=%s)",
+                    "Gemini STT attempt %d failed: %s (rate_limit=%s, transient=%s, timeout=%s)",
                     attempt,
-                    last_error,
+                    last_error or err.__class__.__name__,
                     is_rate_limit,
                     is_transient,
+                    is_timeout,
                 )
 
                 if is_rate_limit:
@@ -294,7 +325,7 @@ class GeminiSTTProvider(BaseSTTProvider):
                     break
 
                 if attempt < max_attempts and is_transient:
-                    backoff_sec = 0.8 * (2 ** (attempt - 1))
+                    backoff_sec = 0.5 * (2 ** (attempt - 1))
                     await asyncio.sleep(backoff_sec)
                     continue
                 break
@@ -320,13 +351,18 @@ class GeminiSTTProvider(BaseSTTProvider):
             if model_to_use in ("gemini-flash-latest", "gemini-2.5-flash"):
                 model_to_use = "gemini-3.5-transcribe"
 
+            cfg = types.GenerateContentConfig(
+                temperature=0.0,
+            )
+
             def _sync_generate():
                 return self._genai_client.models.generate_content(
                     model=model_to_use,
                     contents=[prompt, audio_part],
+                    config=cfg,
                 )
 
-            stt_timeout = min(3.5, float(getattr(settings, "GEMINI_TIMEOUT_SECONDS", 3.5)))
+            stt_timeout = float(getattr(settings, "GEMINI_STT_TIMEOUT_SECONDS", getattr(settings, "GEMINI_TIMEOUT_SECONDS", 8.0)))
             response = await asyncio.wait_for(
                 loop.run_in_executor(None, _sync_generate),
                 timeout=stt_timeout,

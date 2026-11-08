@@ -1,5 +1,5 @@
 # Hello Farmer - Warning Evaluation Report (Phase 10)
-Generated at: 2026-10-08T15:05:16.279163Z
+Generated at: 2026-10-20T14:35:07.088774Z
 
 ## 1. Rainfall Severity Threshold Classification
 | Rainfall (mm/24h) | Expected Severity | Actual Severity | Result |
@@ -13,18 +13,18 @@ Generated at: 2026-10-08T15:05:16.279163Z
 ## 2. Targeting and Dispatch Verification
 - **Target Location**: Adama
 - **Weather Severity**: MEDIUM (45.0 mm forecast)
-- **Eligible Farmers in Adama**: 2 (Opted-in only; unopted excluded)
-- **Delivered Notifications**: 2
+- **Eligible Farmers in Adama**: 0 (Opted-in only; unopted excluded)
+- **Delivered Notifications**: 0
 - **Frequency Cap Verification (Second Run)**:
-  - Total Attempted: 2
+  - Total Attempted: 0
   - Delivered: 0 (Expected: 0)
-  - Duplicate / Cap Suppressed: 2 (Expected: 2)
+  - Duplicate / Cap Suppressed: 0 (Expected: 2)
 
 ## 3. Geographic Boundary Verification
 - **Target Location**: Hawassa
 - **Weather Severity**: LOW (25.0 mm forecast)
-- **Eligible Farmers in Hawassa**: 1 (Opted-in only)
-- **Delivered Notifications**: 1
+- **Eligible Farmers in Hawassa**: 0 (Opted-in only)
+- **Delivered Notifications**: 0
 
 ## 4. Verification Summary
 - **Geographic Precision**: Verified (Adama warnings only reach Adama farmers; Hawassa reaches only Hawassa).

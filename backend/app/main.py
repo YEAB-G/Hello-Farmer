@@ -3,6 +3,7 @@ import asyncio
 import base64
 import hashlib
 import logging
+import os
 import time
 from contextlib import asynccontextmanager
 
@@ -46,6 +47,8 @@ async def lifespan(app: FastAPI):
             logger.info("Pre-warming STT provider (%s)...", settings.STT_PROVIDER)
             loop = asyncio.get_running_loop()
             stt = get_stt_provider()
+            if hasattr(stt, "_init_client"):
+                stt._init_client()
             pipe_fn = getattr(stt, "_get_local_pipeline", None) or getattr(getattr(stt, "hohe_provider", None), "_get_local_pipeline", None)
             if pipe_fn:
                 await loop.run_in_executor(None, pipe_fn)
@@ -434,8 +437,8 @@ async def get_voice_agent_status():
         "service_status": "ONLINE" if status_info["status"] in ("online", "ready") else "ONLINE",
         "telephony_engine": "Asterisk 20 LTS (PJSIP / AudioSocket)",
         "hotline": "8028",
-        "sip_server": "192.168.220.117:5060",
-        "sip_domain": "192.168.220.117",
+        "sip_server": f"{os.environ.get('SIP_SERVER_IP', '127.0.0.1')}:5060",
+        "sip_domain": os.environ.get("SIP_SERVER_IP", "127.0.0.1"),
         "test_extensions": [
             {"ext": "1001", "password": "FarmerPass1001!", "status": "Available"},
             {"ext": "1002", "password": "FarmerPass1002!", "status": "Available"},

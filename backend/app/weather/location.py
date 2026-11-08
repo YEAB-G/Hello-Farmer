@@ -213,7 +213,7 @@ DEFAULT_ETHIOPIAN_PLACES = [
         "name": "Bahir Dar",
         "name_am": "ባሕር ዳር",
         "name_om": "Baahir Daar",
-        "aliases": "Bahirdar,ባህር ዳር,ባህርዳር,bahir dar",
+        "aliases": "Bahirdar,ባህር ዳር,ባህርዳር,ባሕርዳር,ባሕር ዳር,ህርዳር,በህርዳር,bahir dar,bahirdar,bahidaar,bahidar,bahi daaar,bahr dar,ባሂር ዳር,ባርዳር,ባርዳ,ባር ዳር",
         "region": "Amhara",
         "zone": "West Gojjam",
         "woreda": "Bahir Dar",

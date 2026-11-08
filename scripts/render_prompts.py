@@ -77,6 +77,16 @@ PROMPTS_SPEC = {
         "voice": "am-ET-MekdesNeural",
         "text": "እባክዎ ትንሽ ይጠብቁ፣ መረጃውን እየፈለግሁ ነው።",
     },
+    "still_checking_am.wav": {
+        "lang": "am",
+        "voice": "am-ET-MekdesNeural",
+        "text": "አሁንም ከግብርና መመሪያው እያጣራሁ ነው፣ ጥቂት ሰከንድ ይታገሱ።",
+    },
+    "listening_reminder_am.wav": {
+        "lang": "am",
+        "voice": "am-ET-MekdesNeural",
+        "text": "እየሰማሁዎት ነው፣ እባክዎ ጥያቄዎን ይናገሩ።",
+    },
     "error_am.wav": {
         "lang": "am",
         "voice": "am-ET-MekdesNeural",
@@ -136,6 +146,16 @@ PROMPTS_SPEC = {
         "voice": "am-ET-MekdesNeural",
         "text": "Maaloo yeroo gabaabaaf eegaa, odeeffannoo barbaadaa jira.",
     },
+    "still_checking_om.wav": {
+        "lang": "om",
+        "voice": "am-ET-MekdesNeural",
+        "text": "Ammas ragaa qonnaa keessaa ilaalaa jira, maaloo xiqqoo na eegaa.",
+    },
+    "listening_reminder_om.wav": {
+        "lang": "om",
+        "voice": "am-ET-MekdesNeural",
+        "text": "Isin dhaggeeffachaan jira, maaloo gaaffii keessan dubbadhaa.",
+    },
     "error_om.wav": {
         "lang": "om",
         "voice": "Kore",
@@ -194,6 +214,16 @@ PROMPTS_SPEC = {
         "lang": "en",
         "voice": "en-US-JennyNeural",
         "text": "Please hold on for a moment while I retrieve the information.",
+    },
+    "still_checking_en.wav": {
+        "lang": "en",
+        "voice": "en-US-JennyNeural",
+        "text": "Still checking the agricultural manual for you, one moment please.",
+    },
+    "listening_reminder_en.wav": {
+        "lang": "en",
+        "voice": "en-US-JennyNeural",
+        "text": "I am listening, please feel free to ask your question.",
     },
     "error_en.wav": {
         "lang": "en",

@@ -13,6 +13,7 @@ import re
 from typing import Any
 
 try:
+    from app.config import settings
     from app.llm.base import LLMAnswer
     from app.text.amharic import (
         extract_quantities_amharic,
@@ -23,6 +24,7 @@ try:
         number_to_oromo_words,
     )
 except ImportError:
+    from backend.app.config import settings
     from backend.app.llm.base import LLMAnswer
     from backend.app.text.amharic import (
         extract_quantities_amharic,
@@ -206,8 +208,12 @@ def validate_and_guard(
     Returns GuardrailResult with final safe spoken answer.
     """
     reasons: list[str] = []
-    text = answer.answer.strip()
-    gloss = answer.answer_en_gloss.strip()
+    if isinstance(answer, str):
+        text = answer.strip()
+        gloss = ""
+    else:
+        text = getattr(answer, "answer", str(answer)).strip()
+        gloss = getattr(answer, "answer_en_gloss", "").strip()
     safe_fallback = SAFE_FALLBACK_TEXTS.get(language, SAFE_FALLBACK_TEXTS["am"])
 
     # 1. Emergency detection check
@@ -267,7 +273,7 @@ def validate_and_guard(
         context_numbers = extract_all_numbers_from_text(context_text, language=language)
         hallucinated = answer_numbers - context_numbers
         if hallucinated:
-            reasons.append(f"Chemical dosage numbers not found in verified context: {hallucinated}")
+            reasons.append(f"Hallucinated numeric quantities: chemical dosage numbers not found in verified context: {hallucinated}")
             dosage_safe_msg = (
                 "ለደህንነት ሲባል የፀረ-ተባይ ወይም የማዳበሪያ መጠን ከመጠቀምዎ በፊት የተለጠፈውን መመሪያ ያንብቡ እና የልማት ጣቢያ ባለሙያ ያማክሩ።"
                 if language == "am"
@@ -306,8 +312,9 @@ def validate_and_guard(
     # 4. Format digits as words for phone TTS
     clean_answer = replace_digits_with_words(text, language=language)
 
-    # 5. Length Check (max 4 sentences for voice and web readability)
-    clean_answer = truncate_to_sentences(clean_answer, max_sentences=4)
+    # 5. Length Check (configurable max sentences for thorough, polite explanation)
+    max_s = getattr(settings, "VOICE_MAX_RESPONSE_SENTENCES", 6)
+    clean_answer = truncate_to_sentences(clean_answer, max_sentences=max_s)
 
     return GuardrailResult(
         is_safe=True,

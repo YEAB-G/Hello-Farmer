@@ -99,8 +99,20 @@ class MultilingualSTTRouter(BaseSTTProvider):
             hohe_res.detected_language = "am"
             return hohe_res
 
-        # If Hohe produced empty text or transliterated non-Amharic, check for English via Groq Whisper
-        logger.info("Hohe ASR produced empty or non-Amharic output. Checking for English via Groq Whisper...")
+        # If Hohe produced empty text or transliterated non-Amharic, check via Gemini STT first
+        logger.info("Checking Amharic via Gemini STT...")
+        try:
+            gem_res = await self.gemini_provider.transcribe(wav_path_or_bytes, language="am", **kwargs)
+            g_text = (gem_res.text or "").strip()
+            if g_text and len(g_text) >= 1:
+                gem_res.language = "am"
+                gem_res.detected_language = "am"
+                return gem_res
+        except Exception as e:
+            logger.debug("Gemini Amharic check error: %s", e)
+
+        # Check for English via Groq Whisper only if caller actually spoke English
+        logger.info("Checking for English via Groq Whisper...")
         try:
             whisper_res = await self.groq_provider.transcribe(wav_path_or_bytes, language="en", **kwargs)
             w_text = (whisper_res.text or "").strip()

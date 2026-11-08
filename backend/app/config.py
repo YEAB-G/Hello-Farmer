@@ -27,19 +27,20 @@ class AppSettings(BaseSettings):
     HF_TOKEN: str | None = None
     HF_ASR_MODEL: str = "snapwre/hohe-asr-amharic"
     GROQ_STT_MODEL: str = "whisper-large-v3"
-    STT_PROVIDER: str = "hf"
-    STT_FALLBACK_PROVIDER: str = "groq"
+    STT_PROVIDER: str = "gemini"
+    STT_FALLBACK_PROVIDER: str = "none"
     TTS_PROVIDER: str = "edge_tts"
     TTS_FALLBACK_PROVIDER: str = "google"
 
     VOICE_LANGUAGE_DEFAULT: str = "am"
-    VOICE_AMHARIC_ID: str = "am-ET-MekdesNeural"
-    VOICE_AFAAN_OROMO_ID: str = "am-ET-MekdesNeural"
+    VOICE_AMHARIC_ID: str = "Kore"
+    VOICE_AFAAN_OROMO_ID: str = "Kore"
     VOICE_TTS_SPEED: float = 1.0
     VOICE_RATE: float = 1.0
-    VOICE_MAX_RESPONSE_SENTENCES: int = 4
+    VOICE_MAX_RESPONSE_SENTENCES: int = 6
     GEMINI_RATE_LIMIT_RPM: int = 3
     GEMINI_TIMEOUT_SECONDS: float = 12.0
+    GEMINI_STT_TIMEOUT_SECONDS: float = 8.0
 
     EMBEDDING_PROVIDER: str = "bge_m3"
     EMBEDDING_MODEL: str = "BAAI/bge-m3"
@@ -97,10 +98,11 @@ def load_yaml_config(path: str = "config.yaml") -> dict[str, Any]:
 
 
 settings = AppSettings()
-# Enforce multilingual STT routing and calibrated silence timeout
-settings.STT_PROVIDER = "multilingual"
+# Configure STT provider and silence timeout
+settings.STT_PROVIDER = os.getenv("STT_PROVIDER", "gemini")
 settings.HF_ASR_MODEL = "snapwre/hohe-asr-amharic"
 settings.GEMINI_STT_MODEL = "gemini-3.5-flash-lite"
+settings.GEMINI_STT_TIMEOUT_SECONDS = float(os.getenv("GEMINI_STT_TIMEOUT_SECONDS", "8.0"))
 if not settings.HF_TOKEN or not settings.HF_TOKEN.strip():
     settings.HF_TOKEN = os.getenv("HF_TOKEN")
 settings.VAD_ENERGY_THRESHOLD = 150

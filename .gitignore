@@ -37,6 +37,9 @@ eval/reports/tts_samples/
 test_*.wav
 call_recording_*.wav
 knowledge_base/temp_downloads/*.tmp
+*.sql
+scratch/
+*.tsbuildinfo
 
 
 # OS & IDE

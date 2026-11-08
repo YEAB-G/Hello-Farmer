@@ -19,7 +19,9 @@ class FallbackSynthProvider(BaseTTSProvider):
     def __init__(self, cache_dir: str = "backend/cache/tts"):
         super().__init__(cache_dir=cache_dir)
 
-    async def _synthesize_raw(self, text: str, voice: str | None = None, language: str = "am") -> bytes:
+    async def _synthesize_raw(
+        self, text: str, voice: str | None = None, language: str = "am", rate: str | None = None, **kwargs
+    ) -> bytes:
         """Synthesize modulated 8 kHz audio signal proportional to text syllable count."""
         # Estimate duration: ~80ms per character with a floor of 1.5s and cap of 10s
         duration_s = max(1.5, min(10.0, len(text) * 0.08))

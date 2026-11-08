@@ -175,10 +175,27 @@ class HuggingFaceSTTProvider(BaseSTTProvider):
                 last_error = str(e)
 
         # ----------------------------------------------------
-        # Mode 3: Groq Whisper Fallback
+        # Mode 3: Gemini / Groq STT Fallback
         # ----------------------------------------------------
         try:
-            from app.stt.groq_stt import GroqSTTProvider
+            try:
+                from app.stt.gemini_stt import GeminiSTTProvider
+            except ImportError:
+                from backend.app.stt.gemini_stt import GeminiSTTProvider
+            gemini_fallback = GeminiSTTProvider()
+            logger.info("Delegating to Gemini fast fallback STT for %s...", language)
+            res = await gemini_fallback.transcribe(wav_bytes, language=language, **kwargs)
+            if res.text and len(res.text.strip()) > 0:
+                res.fallback_used = True
+                return res
+        except Exception as e:
+            logger.warning("Gemini fallback STT error: %s", e)
+
+        try:
+            try:
+                from app.stt.groq_stt import GroqSTTProvider
+            except ImportError:
+                from backend.app.stt.groq_stt import GroqSTTProvider
             groq_fallback = GroqSTTProvider()
             logger.info("Delegating to Groq fallback STT...")
             res = await groq_fallback.transcribe(wav_bytes, language=language, **kwargs)

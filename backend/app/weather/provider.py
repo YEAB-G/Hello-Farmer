@@ -151,7 +151,7 @@ class OpenMeteoWeatherProvider(BaseWeatherProvider):
         }
 
         try:
-            async with httpx.AsyncClient(timeout=6.0) as client:
+            async with httpx.AsyncClient(timeout=2.0) as client:
                 resp = await client.get(self.BASE_URL, params=params)
                 resp.raise_for_status()
                 data = resp.json()

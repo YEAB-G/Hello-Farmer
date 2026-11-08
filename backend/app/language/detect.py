@@ -17,7 +17,7 @@ TIGRINYA_CHARS = set("ቐቑቒቓቔቕቖኸኹኺኻኼኽኾዀዄዅዂጘ�
 
 TIGRINYA_WORDS = {
     "እንታይ", "ከመይ", "ኣለኹ", "ኣለኻ", "ኣሎ", "ናይ", "ኣብ", "ማይ", "ሰብሊ", "ሕርሻ",
-    "ጸገም", "እዩ", "እያ", "እዮም", "ድዩ", "ድያ", "ጣፍ", "ስርናይ", "ትግርኛ", "ደሓን", "ሰላም"
+    "ጸገም", " እዩ", "እያ", "እዮም", "ድዩ", "ድያ", "ጣፍ", "ስርናይ", "ትግርኛ", "ደሓን", "ሰላም"
 }
 
 AMHARIC_WORDS = {
@@ -98,7 +98,9 @@ def detect_text_language(text: str, stored_preference: str | None = None) -> tup
 
 def format_language_switch_confirmation(target_language: str) -> str:
     """Return confirmation prompt when language is switched."""
-    if target_language == "ti":
+    if target_language == "om":
+        return "Gara Afaan Oromootti jijjiirameera. Maaloo gaaffii keessan gaafadhaa."
+    elif target_language == "ti":
         return "ናብ ትግርኛ ተቐይሩ ኣሎ። እባክኹም ሕቶኹም ሕተቱ።"
     elif target_language == "so":
         return "Waxa loo beddelay Af-Soomaali. Fadlan weydii su'aashaada."
