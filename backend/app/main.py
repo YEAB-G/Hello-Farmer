@@ -7,13 +7,14 @@ import os
 import time
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Response as FastAPIResponse
+from fastapi import Depends, FastAPI, HTTPException, Response as FastAPIResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, func, select
 from sqlalchemy.orm import selectinload
 
 from app.audio.convert import browser_audio_to_wav16k, pcm8k_to_wav, pcm8k_to_wav_base64
+from app.auth import require_admin_auth
 from app.config import settings
 from app.database.models import Call, ConversationMessage, Farmer, FarmerContext, SmsMessage, Warning
 from app.database.session import async_session_factory
@@ -74,7 +75,7 @@ app = FastAPI(
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -360,7 +361,7 @@ async def get_active_warnings():
 
 
 @app.get("/api/v1/developer/sms")
-async def get_developer_sms(limit: int = 50):
+async def get_developer_sms(limit: int = 50, _auth: str = Depends(require_admin_auth)):
     """Retrieve recent simulated SMS dispatches for developer inbox."""
     async with async_session_factory() as session:
         stmt = select(SmsMessage).order_by(desc(SmsMessage.sent_at)).limit(limit)
@@ -396,7 +397,7 @@ async def get_developer_sms(limit: int = 50):
 
 
 @app.get("/api/v1/farmer/profile")
-async def get_farmer_profile():
+async def get_farmer_profile(_auth: str = Depends(require_admin_auth)):
     """Retrieve demo farmer profile for web portal view."""
     async with async_session_factory() as session:
         stmt = select(Farmer).options(selectinload(Farmer.context)).limit(1)
@@ -425,13 +426,18 @@ async def get_farmer_profile():
 async def get_voice_agent_status():
     """Retrieve real-time telephony and AudioSocket service status."""
     status_info = audiosocket_server.get_status()
-    async with async_session_factory() as session:
-        calls_count = (await session.execute(select(func.count(Call.id)))).scalar() or 0
-        latest_call = (
-            await session.execute(
-                select(Call).order_by(desc(Call.started_at)).limit(1)
-            )
-        ).scalar_one_or_none()
+    calls_count = 0
+    latest_call = None
+    try:
+        async with async_session_factory() as session:
+            calls_count = (await session.execute(select(func.count(Call.id)))).scalar() or 0
+            latest_call = (
+                await session.execute(
+                    select(Call).order_by(desc(Call.started_at)).limit(1)
+                )
+            ).scalar_one_or_none()
+    except Exception as e:
+        logger.warning("Could not query DB stats in voice-agent/status: %s", e)
 
     return {
         "service_status": "ONLINE" if status_info["status"] in ("online", "ready") else "ONLINE",
@@ -440,8 +446,8 @@ async def get_voice_agent_status():
         "sip_server": f"{os.environ.get('SIP_SERVER_IP', '127.0.0.1')}:5060",
         "sip_domain": os.environ.get("SIP_SERVER_IP", "127.0.0.1"),
         "test_extensions": [
-            {"ext": "1001", "password": "FarmerPass1001!", "status": "Available"},
-            {"ext": "1002", "password": "FarmerPass1002!", "status": "Available"},
+            {"ext": "1001", "status": "Available", "type": "SIP"},
+            {"ext": "1002", "status": "Available", "type": "SIP"},
         ],
         "active_calls_count": status_info["active_calls_count"],
         "active_call_ids": status_info["active_call_ids"],
@@ -455,7 +461,7 @@ async def get_voice_agent_status():
 
 
 @app.get("/api/v1/telephony/logs")
-async def get_telephony_logs_endpoint(limit: int = 150, since_id: int = 0):
+async def get_telephony_logs_endpoint(limit: int = 150, since_id: int = 0, _auth: str = Depends(require_admin_auth)):
     """Retrieve real-time telephony event logs for live diagnostics and troubleshooting."""
     try:
         from app.telephony.live_logger import get_telephony_logs
@@ -465,7 +471,7 @@ async def get_telephony_logs_endpoint(limit: int = 150, since_id: int = 0):
 
 
 @app.delete("/api/v1/telephony/logs")
-async def clear_telephony_logs_endpoint():
+async def clear_telephony_logs_endpoint(_auth: str = Depends(require_admin_auth)):
     """Clear all telephony event logs."""
     try:
         from app.telephony.live_logger import clear_telephony_logs
@@ -476,7 +482,7 @@ async def clear_telephony_logs_endpoint():
 
 
 @app.get("/api/v1/calls")
-async def get_calls(limit: int = 30, offset: int = 0, language: str | None = None):
+async def get_calls(limit: int = 30, offset: int = 0, language: str | None = None, _auth: str = Depends(require_admin_auth)):
     """Retrieve call history records with pagination and conversation messages."""
     async with async_session_factory() as session:
         base_stmt = select(Call)
@@ -555,7 +561,7 @@ async def get_calls(limit: int = 30, offset: int = 0, language: str | None = Non
 
 
 @app.get("/api/v1/calls/{call_id}")
-async def get_call_detail(call_id: str):
+async def get_call_detail(call_id: str, _auth: str = Depends(require_admin_auth)):
     """Retrieve a single call record and full conversation messages."""
     async with async_session_factory() as session:
         stmt = select(Call).options(selectinload(Call.messages)).where(Call.id == call_id)
@@ -618,7 +624,7 @@ async def get_call_detail(call_id: str):
 
 
 @app.get("/api/v1/analytics/overview")
-async def get_analytics_overview(days: int = 30):
+async def get_analytics_overview(days: int = 30, _auth: str = Depends(require_admin_auth)):
     """Comprehensive real database aggregations for the Platform Performance Analytics dashboard."""
     from datetime import datetime, timedelta
     cutoff = datetime.utcnow() - timedelta(days=days) if days > 0 else datetime.min
@@ -784,7 +790,7 @@ async def get_analytics_overview(days: int = 30):
 
 
 @app.get("/api/v1/admin/analytics")
-async def get_admin_analytics():
+async def get_admin_analytics(_auth: str = Depends(require_admin_auth)):
     """Retrieve aggregated platform metrics."""
     async with async_session_factory() as session:
         calls_count = (await session.execute(select(func.count(Call.id)))).scalar() or 0

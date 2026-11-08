@@ -63,6 +63,15 @@ class AppSettings(BaseSettings):
     DATABASE_URL: str = "postgresql+asyncpg://farmer:farmerpass@postgres:5432/hello_farmer"
     REDIS_URL: str = "redis://redis:6379/0"
 
+    ENVIRONMENT: str = "development"
+    ADMIN_API_KEY: str = "dev_admin_key_hello_farmer_2026"
+    ALLOWED_ORIGINS: list[str] = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+    ]
+
     # Privacy & Recording Policy
     # Options: "transient_only" (default, zero audio files persisted, ephemeral VAD/STT buffer discarded)
     #          "notice_based_persistent" (lawful recording notice announced in greeting; files stored in cache/recordings with retention cleanup)
@@ -76,6 +85,21 @@ class AppSettings(BaseSettings):
     CALLER_RATE_LIMIT_PER_DAY: int = 10
     SIMILARITY_THRESHOLD: float = 0.65
     LOG_LEVEL: str = "INFO"
+
+    def validate_production_secrets(self) -> None:
+        """Fail fast if insecure development defaults are used in production."""
+        if self.ENVIRONMENT.lower() == "production":
+            insecure_defaults = [
+                "hello_farmer_insecure_dev_secret_change_me_32chars!",
+                "D7L2j61X01c90wPZq8c1BvK7x8k1D2M4N6P8Q0R2S4T=",
+                "dev_admin_key_hello_farmer_2026",
+            ]
+            if self.SECRET_KEY in insecure_defaults or len(self.SECRET_KEY) < 32:
+                raise ValueError("CRITICAL SECURITY ERROR: Insecure or short SECRET_KEY detected in production!")
+            if self.PHONE_ENCRYPTION_KEY in insecure_defaults:
+                raise ValueError("CRITICAL SECURITY ERROR: Default PHONE_ENCRYPTION_KEY detected in production!")
+            if self.ADMIN_API_KEY in insecure_defaults or not self.ADMIN_API_KEY.strip():
+                raise ValueError("CRITICAL SECURITY ERROR: Default ADMIN_API_KEY detected in production!")
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -98,6 +122,9 @@ def load_yaml_config(path: str = "config.yaml") -> dict[str, Any]:
 
 
 settings = AppSettings()
+if os.getenv("ALLOWED_ORIGINS"):
+    settings.ALLOWED_ORIGINS = [orig.strip() for orig in os.getenv("ALLOWED_ORIGINS").split(",") if orig.strip()]
+settings.validate_production_secrets()
 # Configure STT provider and silence timeout
 settings.STT_PROVIDER = os.getenv("STT_PROVIDER", "gemini")
 settings.HF_ASR_MODEL = "snapwre/hohe-asr-amharic"
