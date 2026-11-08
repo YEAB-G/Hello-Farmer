@@ -47,6 +47,8 @@ services:
         condition: service_healthy
     volumes:
       - ./backend/app:/app/app
+      - ./backend/alembic:/app/alembic
+      - ./backend/alembic.ini:/app/alembic.ini
       - ./backend/cache:/app/cache
       - ./config.yaml:/app/config.yaml
       - ./pyproject.toml:/app/pyproject.toml

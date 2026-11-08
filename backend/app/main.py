@@ -38,7 +38,20 @@ audiosocket_server = AudioSocketServer(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: Start AudioSocket server in background task
+    # Startup: Apply pending database migrations
+    try:
+        from alembic.config import Config
+        from alembic import command
+        alembic_ini = "alembic.ini" if os.path.exists("alembic.ini") else ("backend/alembic.ini" if os.path.exists("backend/alembic.ini") else None)
+        if alembic_ini:
+            logger.info("Applying pending Alembic database migrations (%s)...", alembic_ini)
+            alembic_cfg = Config(alembic_ini)
+            await asyncio.to_thread(command.upgrade, alembic_cfg, "head")
+            logger.info("Alembic database migrations up-to-date.")
+    except Exception as e:
+        logger.warning("Alembic migration auto-run skipped or failed: %s", e)
+
+    # Start AudioSocket server in background task
     logger.info("Initializing Hello Farmer backend...")
     audiosocket_task = asyncio.create_task(audiosocket_server.start())
 
