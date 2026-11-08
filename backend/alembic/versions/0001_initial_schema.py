@@ -277,3 +277,4 @@ def downgrade() -> None:
     op.execute("DROP TABLE IF EXISTS farmer_crops CASCADE;")
     op.execute("DROP TABLE IF EXISTS farmer_context CASCADE;")
     op.execute("DROP TABLE IF EXISTS farmers CASCADE;")
+

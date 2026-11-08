@@ -149,3 +149,4 @@ async def test_process_utterance_records_stt_latency_when_audio_provided():
     assert "total" in res.metadata.latency_ms
     assert "stt" in res.metadata.latency_ms
     assert res.metadata.latency_ms["stt"] >= 0.0
+

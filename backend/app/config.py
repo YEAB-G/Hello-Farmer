@@ -29,6 +29,9 @@ class AppSettings(BaseSettings):
     GROQ_STT_MODEL: str = "whisper-large-v3"
     STT_PROVIDER: str = "gemini"
     STT_FALLBACK_PROVIDER: str = "none"
+    WHISPER_MODEL_SIZE: str = "tiny"
+    WHISPER_DEVICE: str = "cpu"
+    WHISPER_COMPUTE_TYPE: str = "int8"
     TTS_PROVIDER: str = "edge_tts"
     TTS_FALLBACK_PROVIDER: str = "google"
 

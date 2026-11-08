@@ -28,6 +28,7 @@ async def test_whisper_local_never_returns_fake_transcript_when_uninitialized():
     provider = WhisperLocalSTTProvider(model_size="tiny", device="cpu")
     # Ensure model is None
     provider.model = None
+    provider._force_uninitialized = True
 
     audio_8k = generate_synthetic_pcm_8k(duration_sec=0.2)
     transcript = await provider.transcribe(audio_8k, language="am")
