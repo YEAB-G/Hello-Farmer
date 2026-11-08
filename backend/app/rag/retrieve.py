@@ -192,7 +192,10 @@ async def retrieve_passages(
             (1.0 - cosine_dist).label("dense_similarity"),
         )
         .join(AgriculturalDocument, KnowledgeChunk.document_id == AgriculturalDocument.id)
-        .where(KnowledgeChunk.embedding.is_not(None))
+        .where(
+            KnowledgeChunk.embedding.is_not(None),
+            AgriculturalDocument.source_tier.in_([0, 1, 2, 3]),
+        )
     )
 
     if crop_filter:
@@ -306,7 +309,9 @@ async def retrieve_passages(
             locality_match_name = f"{target_agroecology} agroecological zone"
             geo_boost = 0.08
 
-        final_score = fused_score + geo_boost
+        # Source Tier Authority Boost (Tier 1 MoA/EIAR prioritized over secondary studies)
+        tier_boost = 0.05 if doc_tier == 1 else (0.02 if doc_tier == 2 else 0.0)
+        final_score = fused_score + geo_boost + tier_boost
 
         if final_score < threshold:
             continue

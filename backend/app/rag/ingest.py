@@ -29,11 +29,12 @@ class IngestedDocument(BaseModel):
     crop: str = "general"
     region: str = "national"
     file_path: str
+    sha256_hash: str = ""
     chunks: list[TextChunk] = []
 
 
 def extract_metadata_from_text(raw_text: str, file_path: str) -> dict[str, Any]:
-    """Parse header comments or frontmatter from document text."""
+    """Parse header comments or frontmatter from document text and verify publisher provenance."""
     path_obj = Path(file_path)
     stem = path_obj.stem
     # Use deterministic 32-char hex MD5 so it reliably fits in String(36) DB column
@@ -43,14 +44,31 @@ def extract_metadata_from_text(raw_text: str, file_path: str) -> dict[str, Any]:
     if len(clean_title) > 240:
         clean_title = clean_title[:240]
 
-    # Default publisher & tier from directory location
-    publisher = "Ministry of Agriculture, Ethiopia (MoA)"
-    tier = 1
-    if "ess data" in str(file_path).lower():
+    # Verify publisher & source tier based on strict provenance rules (Rule 10)
+    path_str_lower = str(file_path).replace("\\", "/").lower()
+
+    if "moa guidelines" in path_str_lower or "/moa/" in path_str_lower or stem.lower().startswith("moa"):
+        publisher = "Ministry of Agriculture, Ethiopia (MoA)"
+        tier = 1
+    elif "eiar" in path_str_lower or "ethiopian institute of agricultural research" in path_str_lower:
+        publisher = "Ethiopian Institute of Agricultural Research (EIAR)"
+        tier = 1
+    elif "ess data" in path_str_lower or "statistical service" in path_str_lower:
         publisher = "Ethiopian Statistical Service (ESS)"
-    elif "fao" in stem.lower():
+        tier = 1
+    elif "fao" in stem.lower() or "/fao/" in path_str_lower:
         publisher = "FAO / UN"
         tier = 2
+    elif any(k in path_str_lower or k in stem.lower() for k in ["cgiar", "ilri", "cimmyt", "icarda"]):
+        publisher = "CGIAR"
+        tier = 2
+    elif any(k in path_str_lower or k in stem.lower() for k in ["university", "haramaya", "hawassa", "bahir dar"]):
+        publisher = "Academic / University Research"
+        tier = 3
+    else:
+        # Default unknown/unverified documents to Tier 4 (never invent MoA provenance)
+        publisher = "Unknown / Unverified"
+        tier = 4
 
     metadata = {
         "document_id": safe_doc_id,
@@ -83,7 +101,18 @@ def extract_metadata_from_text(raw_text: str, file_path: str) -> dict[str, Any]:
             elif "title" in key:
                 metadata["title"] = val[:240]
             elif "publisher" in key:
-                metadata["publisher"] = val[:240]
+                val_pub = val[:240].strip()
+                metadata["publisher"] = val_pub
+                pub_lower = val_pub.lower()
+                # Classify publisher into verified tier
+                if any(k in pub_lower for k in ["ministry of agriculture", "moa", "eiar", "ethiopian institute of agricultural research", "ess", "statistical service"]):
+                    metadata["source_tier"] = 1
+                elif any(k in pub_lower for k in ["fao", "cgiar", "ilri", "cimmyt", "icarda", "united nations", "world bank"]):
+                    metadata["source_tier"] = 2
+                elif any(k in pub_lower for k in ["university", "college", "journal", "academic", "institute"]):
+                    metadata["source_tier"] = 3
+                else:
+                    metadata["source_tier"] = 4
             elif "year" in key and val.isdigit():
                 metadata["publication_year"] = int(val)
             elif "tier" in key:
@@ -212,6 +241,8 @@ def parse_and_validate_document(file_path: str) -> IngestedDocument | None:
     if not chunks:
         return None
 
+    sha256 = hashlib.sha256(content.encode("utf-8")).hexdigest()
+
     return IngestedDocument(
         document_id=meta["document_id"],
         title=meta["title"],
@@ -223,6 +254,7 @@ def parse_and_validate_document(file_path: str) -> IngestedDocument | None:
         crop=meta["crop"],
         region=meta["region"],
         file_path=str(path),
+        sha256_hash=sha256,
         chunks=chunks,
     )
 
