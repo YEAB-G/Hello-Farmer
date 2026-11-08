@@ -36,13 +36,14 @@ class WhisperLocalSTTProvider(BaseSTTProvider):
         self._load_model_if_needed()
 
         if self.model is None:
-            # Fallback for testing / container without faster-whisper compiled
+            # Model unavailable or uninitialized - never return fake ASR transcripts (Rule 8)
             latency_ms = (time.perf_counter() - start_time) * 1000.0
             return Transcript(
-                text="ጤፍ ላይ ቢጫ ቅጠል ታይቷል" if language == "am" else "Baalli xaafii keelloo tahe",
-                confidence=0.88,
-                provider="whisper_mock",
-                latency_ms=max(20.0, latency_ms),
+                text="",
+                confidence=0.0,
+                provider="whisper_local_unavailable",
+                error="Faster-Whisper model is not initialized or unavailable on this system",
+                latency_ms=max(1.0, latency_ms),
                 language=language,
             )
 

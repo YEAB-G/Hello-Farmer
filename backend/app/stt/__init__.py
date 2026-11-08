@@ -23,8 +23,10 @@ _STT_CACHE: dict[str, BaseSTTProvider] = {}
 def get_stt_provider(provider_type: str | None = None) -> BaseSTTProvider:
     ptype = (provider_type or getattr(settings, "STT_PROVIDER", "multilingual")).lower()
     if ptype not in _STT_CACHE:
-        if ptype in ("router", "multilingual", "multi", "hf", "huggingface", "hohe"):
+        if ptype in ("router", "multilingual", "multi"):
             _STT_CACHE[ptype] = MultilingualSTTRouter()
+        elif ptype in ("hf", "huggingface", "hohe"):
+            _STT_CACHE[ptype] = HuggingFaceSTTProvider()
         elif ptype == "groq":
             _STT_CACHE[ptype] = GroqSTTProvider()
         elif ptype == "gemini":
